@@ -202,6 +202,7 @@ def grpo_accumulated_loss(
             trainer.accelerator.scaler,
             n_chunks, 
         )
+        print(f"\033[95m[EfficientGRPO] loss={loss} \033[0m")
         return loss, completion_length, mean_kl
 
         # Old non efficient code path
@@ -959,8 +960,11 @@ class _UnslothGRPOTrainer(Trainer):
             all_prompts_text = gather_object(prompts_text)
             if self.accelerator.is_main_process:
                 if self.env is not None:
+                    # prompt_completion_pairs = self.env.generate(
+                    #     prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs
+                    # )
                     prompt_completion_pairs = self.env.generate(
-                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs
+                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs, lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True)
                     )
                 else:
                     raise ValueError("Ink: env is needed")
@@ -994,6 +998,8 @@ class _UnslothGRPOTrainer(Trainer):
         num_stages = len(prompt_completion_pairs)
         all_stages_inputs = []
         for stage_id in range(num_stages):
+            if stage_id != 2:
+                continue
             completion_ids = prompt_completion_pairs[stage_id]['completion_token_ids']
             prompt_token_ids = prompt_completion_pairs[stage_id]['prompt_token_ids']
             prompt_ids = torch.tensor(prompt_token_ids, device=device).expand(len(completion_ids), -1)
@@ -1138,8 +1144,14 @@ class _UnslothGRPOTrainer(Trainer):
             raise ValueError("The GRPOTrainer does not support returning outputs")
         # Compute the per-token log probabilities for the model
 
-        total_loss = []
-        for stage_id, inputs in enumerate(inputs_list):
+        if (len(inputs_list) == 0):
+            print("\033[96m[Warning]  The input for stage-2 is null, adopting pseudo loss\033[0m")
+            pseudo_loss = torch.tensor(0.0, requires_grad=True, device=self.accelerator.device)
+            return pseudo_loss
+        else:
+            print(f"\033[96m[INFO] inputs_list length:  {len(inputs_list)}\033[0m")
+            stage_id = 2
+            inputs = inputs_list[0]
             prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
             completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
             input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
@@ -1171,7 +1183,6 @@ class _UnslothGRPOTrainer(Trainer):
                     self, _input_ids, logits_to_keep, completion_mask, advantages,
                     n_chunks = self.args.unsloth_num_chunks,
                 )
-            total_loss.append(loss)
 
             # Log the metrics
             # completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item()
@@ -1181,12 +1192,14 @@ class _UnslothGRPOTrainer(Trainer):
 
             if "train" in self._metrics:
                 mode = "eval" if self.control.should_evaluate else "train"
-                self._metrics[mode][f"completion_length-{stage_id}"].append(completion_length.item())
-                self._metrics[mode][f"kl-{stage_id}"].append(mean_kl.item())
+                self._metrics[mode][f"completion_length-stage_{stage_id}"].append(completion_length.item())
+                self._metrics[mode][f"kl-stage_{stage_id}"].append(mean_kl.item())
             else:
-                self._metrics[f"completion_length-{stage_id}"].append(completion_length.item())
-                self._metrics[f"kl-{stage_id}"].append(mean_kl.item())
-        return sum(total_loss) / len(total_loss)
+                self._metrics[f"completion_length-stage_{stage_id}"].append(completion_length.item())
+                self._metrics[f"kl-stage_{stage_id}"].append(mean_kl.item())
+            print(f"\033[96m[INFO] loss:  {loss}\033[0m")
+
+            return loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys: Optional[list[str]] = None):
         inputs = self._prepare_inputs(inputs)

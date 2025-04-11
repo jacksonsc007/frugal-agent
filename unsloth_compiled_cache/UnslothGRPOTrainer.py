@@ -1,7 +1,7 @@
 """
 2025.3.17
 2025.3.19
-4.49.0
+4.51.0
 0.16.0.dev0
 __UNSLOTH_VERSIONING__
 """
@@ -9,7 +9,7 @@ from torch import Tensor
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from trl.trainer.grpo_trainer import (Any, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, Dataset, Environment, GRPOConfig, GRPOTrainer, GenerationConfig, IterableDataset, LLM, Optional, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, RepeatRandomSampler, RewardFunc, Sampler, SamplingParams, SyncRefModelCallback, Trainer, TrainerCallback, Union, apply_chat_template, broadcast_object_list, create_reference_model, defaultdict, gather, gather_object, generate_model_card, get_comet_experiment_url, is_conversational, is_deepspeed_zero3_enabled, is_peft_model, is_wandb_available, maybe_apply_chat_template, nn, os, pad, patch, prepare_deepspeed, set_seed, textwrap, torch, transformers, unwrap_model_for_generation, version, wandb, warnings, os, torch, transformers, Any, LLM, Union, apply_chat_template, broadcast_object_list, gather, gather_object, is_conversational, maybe_apply_chat_template, nn, os, pad, torch, unwrap_model_for_generation, version, wandb, GRPOTrainer, Trainer, gather, os, torch)
+from trl.trainer.grpo_trainer import (Any, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, Dataset, Environment, GRPOConfig, GRPOTrainer, GenerationConfig, IterableDataset, LLM, Optional, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, RepeatRandomSampler, RewardFunc, Sampler, SamplingParams, SyncRefModelCallback, Trainer, TrainerCallback, Union, apply_chat_template, broadcast_object_list, create_reference_model, defaultdict, gather, gather_object, generate_model_card, get_comet_experiment_url, is_conversational, is_deepspeed_zero3_enabled, is_peft_model, is_wandb_available, maybe_apply_chat_template, nn, os, pad, prepare_deepspeed, set_seed, textwrap, torch, transformers, unwrap_model_for_generation, version, wandb, warnings, os, torch, transformers, Any, LLM, Union, apply_chat_template, broadcast_object_list, gather, gather_object, is_conversational, maybe_apply_chat_template, nn, os, pad, torch, unwrap_model_for_generation, version, wandb, GRPOTrainer, Trainer, gather, os, torch)
 
 
 import os
@@ -441,6 +441,7 @@ class UnslothGRPOConfig(GRPOConfig):
         fsdp = '',
         fsdp_min_num_params = 0,
         fsdp_config = None,
+        tp_size = 0,
         fsdp_transformer_layer_cls_to_wrap = None,
         accelerator_config = None,
         deepspeed = None,
@@ -470,7 +471,6 @@ class UnslothGRPOConfig(GRPOConfig):
         include_inputs_for_metrics = False,
         eval_do_concat_batches = True,
         fp16_backend = 'auto',
-        evaluation_strategy = None,
         push_to_hub_model_id = None,
         push_to_hub_organization = None,
         push_to_hub_token = None,
@@ -483,8 +483,6 @@ class UnslothGRPOConfig(GRPOConfig):
         torch_compile = False,
         torch_compile_backend = None,
         torch_compile_mode = None,
-        dispatch_batches = None,
-        split_batches = None,
         include_tokens_per_second = False,
         include_num_input_tokens_seen = False,
         neftune_noise_alpha = None,
@@ -602,6 +600,7 @@ class UnslothGRPOConfig(GRPOConfig):
             fsdp = fsdp,
             fsdp_min_num_params = fsdp_min_num_params,
             fsdp_config = fsdp_config,
+            tp_size = tp_size,
             fsdp_transformer_layer_cls_to_wrap = fsdp_transformer_layer_cls_to_wrap,
             accelerator_config = accelerator_config,
             deepspeed = deepspeed,
@@ -631,7 +630,6 @@ class UnslothGRPOConfig(GRPOConfig):
             include_inputs_for_metrics = include_inputs_for_metrics,
             eval_do_concat_batches = eval_do_concat_batches,
             fp16_backend = fp16_backend,
-            evaluation_strategy = evaluation_strategy,
             push_to_hub_model_id = push_to_hub_model_id,
             push_to_hub_organization = push_to_hub_organization,
             push_to_hub_token = push_to_hub_token,
@@ -644,8 +642,6 @@ class UnslothGRPOConfig(GRPOConfig):
             torch_compile = torch_compile,
             torch_compile_backend = torch_compile_backend,
             torch_compile_mode = torch_compile_mode,
-            dispatch_batches = dispatch_batches,
-            split_batches = split_batches,
             include_tokens_per_second = include_tokens_per_second,
             include_num_input_tokens_seen = include_num_input_tokens_seen,
             neftune_noise_alpha = neftune_noise_alpha,
@@ -960,8 +956,11 @@ class _UnslothGRPOTrainer(Trainer):
             if self.accelerator.is_main_process:
                 if self.env is not None:
                     prompt_completion_pairs = self.env.generate(
-                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs
+                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs, lora_request = None
                     )
+                    # prompt_completion_pairs = self.env.generate(
+                    #     prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs, lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True)
+                    # )
                 else:
                     raise ValueError("Ink: env is needed")
                     outputs = self.llm.generate(all_prompts_text, sampling_params=self.sampling_params, use_tqdm=False, lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True))
@@ -994,6 +993,8 @@ class _UnslothGRPOTrainer(Trainer):
         num_stages = len(prompt_completion_pairs)
         all_stages_inputs = []
         for stage_id in range(num_stages):
+            if stage_id != 2:
+                continue
             completion_ids = prompt_completion_pairs[stage_id]['completion_token_ids']
             prompt_token_ids = prompt_completion_pairs[stage_id]['prompt_token_ids']
             prompt_ids = torch.tensor(prompt_token_ids, device=device).expand(len(completion_ids), -1)

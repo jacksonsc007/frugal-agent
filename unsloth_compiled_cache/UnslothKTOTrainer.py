@@ -1,7 +1,7 @@
 """
 2025.3.17
 2025.3.19
-4.49.0
+4.51.0
 0.16.0.dev0
 __UNSLOTH_VERSIONING__
 """
@@ -9,7 +9,7 @@ from torch import Tensor
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from trl.trainer.kto_trainer import (Any, AutoModelForCausalLM, BaseImageProcessor, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalLoopOutput, F, FeatureExtractionMixin, KTOConfig, KTOTrainer, Literal, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, ProcessorMixin, SequentialSampler, Trainer, TrainerCallback, TrainingArguments, Union, _get_kl_dataset, _process_tokens, _tokenize, amp, concatenate_datasets, contextmanager, create_reference_model, deepcopy, deepspeed, defaultdict, disable_dropout_in_model, generate_model_card, get_comet_experiment_url, has_length, inspect, is_comet_available, is_peft_available, is_wandb_available, itemgetter, log_table_to_comet_experiment, maybe_apply_chat_template, maybe_extract_prompt, maybe_unpair_preference_dataset, nn, np, nullcontext, os, pad_to_length, pd, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, textwrap, torch, tqdm, transformers, version, wandb, warnings)
+from trl.trainer.kto_trainer import (Any, AutoModelForCausalLM, BaseImageProcessor, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalLoopOutput, F, FeatureExtractionMixin, KTOConfig, KTOTrainer, Literal, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, ProcessorMixin, SequentialSampler, Trainer, TrainerCallback, TrainingArguments, Union, _get_kl_dataset, _process_tokens, _tokenize, amp, concatenate_datasets, contextmanager, create_reference_model, deepcopy, defaultdict, disable_dropout_in_model, generate_model_card, get_comet_experiment_url, has_length, inspect, is_comet_available, is_peft_available, is_wandb_available, itemgetter, log_table_to_comet_experiment, maybe_apply_chat_template, maybe_extract_prompt, maybe_unpair_preference_dataset, nn, np, nullcontext, os, pad_to_length, pd, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, textwrap, torch, tqdm, transformers, version, wandb, warnings)
 
 
 import os
@@ -188,6 +188,7 @@ class UnslothKTOConfig(KTOConfig):
         fsdp = '',
         fsdp_min_num_params = 0,
         fsdp_config = None,
+        tp_size = 0,
         fsdp_transformer_layer_cls_to_wrap = None,
         accelerator_config = None,
         deepspeed = None,
@@ -217,7 +218,6 @@ class UnslothKTOConfig(KTOConfig):
         include_inputs_for_metrics = False,
         eval_do_concat_batches = True,
         fp16_backend = 'auto',
-        evaluation_strategy = None,
         push_to_hub_model_id = None,
         push_to_hub_organization = None,
         push_to_hub_token = None,
@@ -230,8 +230,6 @@ class UnslothKTOConfig(KTOConfig):
         torch_compile = False,
         torch_compile_backend = None,
         torch_compile_mode = None,
-        dispatch_batches = None,
-        split_batches = None,
         include_tokens_per_second = False,
         include_num_input_tokens_seen = False,
         neftune_noise_alpha = None,
@@ -348,6 +346,7 @@ class UnslothKTOConfig(KTOConfig):
             fsdp = fsdp,
             fsdp_min_num_params = fsdp_min_num_params,
             fsdp_config = fsdp_config,
+            tp_size = tp_size,
             fsdp_transformer_layer_cls_to_wrap = fsdp_transformer_layer_cls_to_wrap,
             accelerator_config = accelerator_config,
             deepspeed = deepspeed,
@@ -377,7 +376,6 @@ class UnslothKTOConfig(KTOConfig):
             include_inputs_for_metrics = include_inputs_for_metrics,
             eval_do_concat_batches = eval_do_concat_batches,
             fp16_backend = fp16_backend,
-            evaluation_strategy = evaluation_strategy,
             push_to_hub_model_id = push_to_hub_model_id,
             push_to_hub_organization = push_to_hub_organization,
             push_to_hub_token = push_to_hub_token,
@@ -390,8 +388,6 @@ class UnslothKTOConfig(KTOConfig):
             torch_compile = torch_compile,
             torch_compile_backend = torch_compile_backend,
             torch_compile_mode = torch_compile_mode,
-            dispatch_batches = dispatch_batches,
-            split_batches = split_batches,
             include_tokens_per_second = include_tokens_per_second,
             include_num_input_tokens_seen = include_num_input_tokens_seen,
             neftune_noise_alpha = neftune_noise_alpha,

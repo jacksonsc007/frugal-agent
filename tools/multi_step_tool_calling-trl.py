@@ -293,9 +293,9 @@ training_args = GRPOConfig(
 
     num_generations=2,
 
-    max_prompt_length=256,
+    max_prompt_length=1024,
 
-    max_completion_length=786,
+    max_completion_length=2048,
 
     num_train_epochs=1,
 
@@ -303,8 +303,8 @@ training_args = GRPOConfig(
 
     max_grad_norm=0.1,
 
-    # report_to="none",
-    report_to="wandb",
+    report_to="none",
+    # report_to="wandb",
 
     log_on_each_node=False,
 
@@ -371,7 +371,9 @@ trainer = GRPOTrainer(
         
         log_func_multi_step,
 
-        saver_content_reward_func
+        saver_content_reward_func,
+        
+        saver_filetype_reward_func,
         
         ],
 

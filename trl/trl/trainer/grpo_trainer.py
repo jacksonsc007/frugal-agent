@@ -551,8 +551,11 @@ class GRPOTrainer(Trainer):
             if self.accelerator.is_main_process:
                 if self.env is not None:
                     prompt_completion_pairs = self.env.generate(
-                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs
+                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs, lora_request = None
                     )
+                    # prompt_completion_pairs = self.env.generate(
+                    #     prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs, lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True)
+                    # )
                 else:
                     raise ValueError("Ink: env is needed")
                     outputs = self.llm.generate(all_prompts_text, sampling_params=self.sampling_params, use_tqdm=False)
@@ -585,6 +588,8 @@ class GRPOTrainer(Trainer):
         num_stages = len(prompt_completion_pairs)
         all_stages_inputs = []
         for stage_id in range(num_stages):
+            if stage_id != 2:
+                continue
             completion_ids = prompt_completion_pairs[stage_id]['completion_token_ids']
             prompt_token_ids = prompt_completion_pairs[stage_id]['prompt_token_ids']
             prompt_ids = torch.tensor(prompt_token_ids, device=device).expand(len(completion_ids), -1)
@@ -735,7 +740,15 @@ class GRPOTrainer(Trainer):
         # Compute the per-token log probabilities for the model
 
         total_loss = []
-        for stage_idx, inputs in enumerate(inputs_list):
+        if (len(inputs_list) == 0):
+            # We focus on stage-2, savertool calling, in this experiment
+            # Return a zeroed loss to keep training/inference running without effect
+            pseudo_loss = torch.tensor(0.0, requires_grad=True, device=self.accelerator.device)
+            total_loss.append(pseudo_loss)
+        else:
+            # for stage_idx, inputs in enumerate(inputs_list):
+            stage_idx = 2
+            inputs = inputs_list[0]
             prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
             completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
             input_ids = torch.cat([prompt_ids, completion_ids], dim=1)

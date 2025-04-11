@@ -1,3 +1,11 @@
+# network
+import os
+os.environ["https_proxy"] = "http://192.168.1.12:7891"
+# os.environ["UNSLOTH_COMPILE_DISABLE"] = "1"
+# fallback
+import coredumpy
+# Create a dump in "./dumps" when there's an unhandled exception
+coredumpy.patch_except(directory='./dumps')
 # unsloth needs to be import before importing trl
 from unsloth import FastLanguageModel
 import torch
@@ -13,18 +21,11 @@ import sys
 sys.path.append(".")
 from utils.reward_functions import *
 from utils.env import ToolCallingEnv
-from utils.sys_prompts import MASTERMIND_SYS_PROMPT as SYSTEM_PROMPT
+from utils.sys_prompts import MASTERMIND_SYS_PROMPT_TOOL_SPECIFIC as SYSTEM_PROMPT
 from utils.arsenal import TOOLS
 from unsloth_compiled_cache.UnslothGRPOTrainer_loss_modified import UnslothGRPOTrainer
 # from unsloth_compiled_cache.UnslothGRPOTrainer import UnslothGRPOTrainer
 
-# fallback
-import coredumpy
-# Create a dump in "./dumps" when there's an unhandled exception
-coredumpy.patch_except(directory='./dumps')
-# network
-import os
-os.environ["https_proxy"] = "http://192.168.1.12:7891"
 
 import copy
 
@@ -48,7 +49,7 @@ if debug:
 
 # ========== Hyperparameters ==========
 # exp_name = "ink_curated_data-only_markdown_struture_data-concise_sys_prompt_2-resume-add_logic_hieraychy_bonus_reward"
-exp_name = "apply_save_contraint-2"
+exp_name = "fix_lora_bug-saver_format_with_concrete_sys_prompt"
 max_seq_length = (4096 + 1024)
 max_prompt_length = 2048
 # NOTE: ?
