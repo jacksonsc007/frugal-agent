@@ -998,8 +998,6 @@ class _UnslothGRPOTrainer(Trainer):
         num_stages = len(prompt_completion_pairs)
         all_stages_inputs = []
         for stage_id in range(num_stages):
-            if stage_id != 2:
-                continue
             completion_ids = prompt_completion_pairs[stage_id]['completion_token_ids']
             prompt_token_ids = prompt_completion_pairs[stage_id]['prompt_token_ids']
             prompt_ids = torch.tensor(prompt_token_ids, device=device).expand(len(completion_ids), -1)
@@ -1121,9 +1119,15 @@ class _UnslothGRPOTrainer(Trainer):
                     "reward": rewards.tolist(),
                 }
                 df = pd.DataFrame(table)
-
                 if wandb.run is not None and self.accelerator.is_main_process:
-                    wandb.log({"completions": wandb.Table(dataframe=df)})
+                    if not hasattr(self, "wandb_table"):
+                        self.wandb_table = wandb.Table(dataframe=df)
+                    else:
+                        self.wandb_table.add_data(df)
+
+                    # print("Logging prompts and completions to wandb")
+                    wandb.log({"completions": self.wandb_table})
+
 
             all_stages_inputs.append(
                 {
@@ -1144,14 +1148,13 @@ class _UnslothGRPOTrainer(Trainer):
             raise ValueError("The GRPOTrainer does not support returning outputs")
         # Compute the per-token log probabilities for the model
 
-        if (len(inputs_list) == 0):
-            print("\033[96m[Warning]  The input for stage-2 is null, adopting pseudo loss\033[0m")
-            pseudo_loss = torch.tensor(0.0, requires_grad=True, device=self.accelerator.device)
-            return pseudo_loss
-        else:
-            print(f"\033[96m[INFO] inputs_list length:  {len(inputs_list)}\033[0m")
-            stage_id = 2
-            inputs = inputs_list[0]
+        # assert len(inputs_list)== 2, ("In this experiment, the input list should not be empty, since we train both two stages rather than only the second stage")
+            
+        if (len(inputs_list)== 0):
+            print("In this experiment, the input list should not be empty, since we train both two stages rather than only the second stage")
+
+        total_loss = []
+        for stage_id, inputs in enumerate(inputs_list):
             prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
             completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
             input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
@@ -1183,7 +1186,7 @@ class _UnslothGRPOTrainer(Trainer):
                     self, _input_ids, logits_to_keep, completion_mask, advantages,
                     n_chunks = self.args.unsloth_num_chunks,
                 )
-
+            total_loss.append(loss)
             # Log the metrics
             # completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item()
 
@@ -1197,9 +1200,9 @@ class _UnslothGRPOTrainer(Trainer):
             else:
                 self._metrics[f"completion_length-stage_{stage_id}"].append(completion_length.item())
                 self._metrics[f"kl-stage_{stage_id}"].append(mean_kl.item())
-            print(f"\033[96m[INFO] loss:  {loss}\033[0m")
 
-            return loss
+        loss = sum(total_loss) / len(total_loss)
+        return loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys: Optional[list[str]] = None):
         inputs = self._prepare_inputs(inputs)

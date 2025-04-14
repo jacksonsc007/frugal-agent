@@ -1,7 +1,7 @@
 """
 2025.3.17
 2025.3.19
-4.51.0
+4.49.0
 0.16.0.dev0
 __UNSLOTH_VERSIONING__
 """
@@ -183,7 +183,6 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         fsdp = '',
         fsdp_min_num_params = 0,
         fsdp_config = None,
-        tp_size = 0,
         fsdp_transformer_layer_cls_to_wrap = None,
         accelerator_config = None,
         deepspeed = None,
@@ -213,6 +212,7 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         include_inputs_for_metrics = False,
         eval_do_concat_batches = True,
         fp16_backend = 'auto',
+        evaluation_strategy = None,
         push_to_hub_model_id = None,
         push_to_hub_organization = None,
         push_to_hub_token = None,
@@ -225,6 +225,8 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         torch_compile = False,
         torch_compile_backend = None,
         torch_compile_mode = None,
+        dispatch_batches = None,
+        split_batches = None,
         include_tokens_per_second = False,
         include_num_input_tokens_seen = False,
         neftune_noise_alpha = None,
@@ -335,7 +337,6 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             fsdp = fsdp,
             fsdp_min_num_params = fsdp_min_num_params,
             fsdp_config = fsdp_config,
-            tp_size = tp_size,
             fsdp_transformer_layer_cls_to_wrap = fsdp_transformer_layer_cls_to_wrap,
             accelerator_config = accelerator_config,
             deepspeed = deepspeed,
@@ -365,6 +366,7 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             include_inputs_for_metrics = include_inputs_for_metrics,
             eval_do_concat_batches = eval_do_concat_batches,
             fp16_backend = fp16_backend,
+            evaluation_strategy = evaluation_strategy,
             push_to_hub_model_id = push_to_hub_model_id,
             push_to_hub_organization = push_to_hub_organization,
             push_to_hub_token = push_to_hub_token,
@@ -377,6 +379,8 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             torch_compile = torch_compile,
             torch_compile_backend = torch_compile_backend,
             torch_compile_mode = torch_compile_mode,
+            dispatch_batches = dispatch_batches,
+            split_batches = split_batches,
             include_tokens_per_second = include_tokens_per_second,
             include_num_input_tokens_seen = include_num_input_tokens_seen,
             neftune_noise_alpha = neftune_noise_alpha,

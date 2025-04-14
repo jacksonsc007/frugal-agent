@@ -21,7 +21,7 @@ import sys
 sys.path.append(".")
 from utils.reward_functions import *
 from utils.env import ToolCallingEnv
-from utils.sys_prompts import MASTERMIND_SYS_PROMPT_TOOL_SPECIFIC as SYSTEM_PROMPT
+from utils.sys_prompts import MASTERMIND_SYS_PROMPT as SYSTEM_PROMPT
 from utils.arsenal import TOOLS
 from unsloth_compiled_cache.UnslothGRPOTrainer_loss_modified import UnslothGRPOTrainer
 # from unsloth_compiled_cache.UnslothGRPOTrainer import UnslothGRPOTrainer
@@ -49,7 +49,10 @@ if debug:
 
 # ========== Hyperparameters ==========
 # exp_name = "ink_curated_data-only_markdown_struture_data-concise_sys_prompt_2-resume-add_logic_hieraychy_bonus_reward"
-exp_name = "fix_lora_bug-saver_format_with_concrete_sys_prompt"
+# exp_name = "fix_lora_bug-saver_format_with_concrete_sys_prompt"
+if os.environ.get("EXP_NAME") is None:
+    raise ValueError("Environment Variable EXP_NAME must be set")
+exp_name = os.environ.get("EXP_NAME")
 max_seq_length = (4096 + 1024)
 max_prompt_length = 2048
 # NOTE: ?
@@ -130,7 +133,7 @@ if __name__ == "__main__":
         load_in_4bit=True,
         fast_inference=True, # vLLM support
         max_lora_rank=lora_rank,
-        gpu_memory_utilization=0.6,
+        gpu_memory_utilization=0.7,
     )
     
     model = FastLanguageModel.get_peft_model(
@@ -163,7 +166,7 @@ if __name__ == "__main__":
         num_generations = 6,
         max_prompt_length = max_prompt_length,
         max_completion_length = max_completion_length,
-        num_train_epochs = 10,
+        num_train_epochs = 1,
         # or
         # max_steps=500,
         save_steps = 250,
@@ -174,6 +177,7 @@ if __name__ == "__main__":
         logging_dir= output_dir,
         logging_strategy= "steps",
         log_level="info",
+        log_completions = True,
     ) 
     
     custom_env = ToolCallingEnv(TOOLS)
@@ -188,10 +192,11 @@ if __name__ == "__main__":
             # logic_heading_hierarchy_func,
             # overall_format_reward_func,
             # more_tags_reward_func,
-            tool_calling_reward_func,
+            ordinary_tool_calling_reward_func,
+            dependent_tool_calling_reward_func,
             log_func_multi_step,
-            saver_content_reward_func,
-            saver_filetype_reward_func
+            # saver_content_reward_func,
+            # saver_filetype_reward_func
             
         ],
         args=train_args,

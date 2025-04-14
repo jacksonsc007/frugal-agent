@@ -245,6 +245,7 @@ def xmlcount_reward_func(completions, **kwargs) -> list[float]:
 
 #model_name = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_SIZE = "0.5B"
+# MODEL_SIZE = "7B"
 model_name = f"Qwen/Qwen2.5-{MODEL_SIZE}-Instruct"
 
 
@@ -303,10 +304,11 @@ training_args = GRPOConfig(
 
     max_grad_norm=0.1,
 
-    report_to="none",
-    # report_to="wandb",
+    # report_to="none",
+    report_to="wandb",
 
     log_on_each_node=False,
+    log_completions = True,
 
 )
 
@@ -367,7 +369,7 @@ trainer = GRPOTrainer(
 
         # correctness_reward_func,
 
-        tool_calling_reward_func,
+        ordinary_tool_calling_reward_func,
         
         log_func_multi_step,
 

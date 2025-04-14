@@ -588,8 +588,6 @@ class GRPOTrainer(Trainer):
         num_stages = len(prompt_completion_pairs)
         all_stages_inputs = []
         for stage_id in range(num_stages):
-            if stage_id != 2:
-                continue
             completion_ids = prompt_completion_pairs[stage_id]['completion_token_ids']
             prompt_token_ids = prompt_completion_pairs[stage_id]['prompt_token_ids']
             prompt_ids = torch.tensor(prompt_token_ids, device=device).expand(len(completion_ids), -1)
@@ -741,6 +739,7 @@ class GRPOTrainer(Trainer):
 
         total_loss = []
         if (len(inputs_list) == 0):
+            raise ValueError("In this experiment, the input list should not be empty, since we train both two stages rather than only the second stage")
             # We focus on stage-2, savertool calling, in this experiment
             # Return a zeroed loss to keep training/inference running without effect
             pseudo_loss = torch.tensor(0.0, requires_grad=True, device=self.accelerator.device)
