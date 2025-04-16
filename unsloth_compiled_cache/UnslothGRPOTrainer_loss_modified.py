@@ -1106,7 +1106,6 @@ class _UnslothGRPOTrainer(Trainer):
 
             if (
                 self.log_completions
-                and self.state.global_step % self.args.logging_steps == 0
                 and "wandb" in self.args.report_to
             ):
                 import pandas as pd
@@ -1117,16 +1116,20 @@ class _UnslothGRPOTrainer(Trainer):
                     "prompt": gather_object(prompts_text),
                     "completion": gather_object(completions_text),
                     "reward": rewards.tolist(),
+                    "stage_id": [str(stage_id)] * len(rewards),
                 }
                 df = pd.DataFrame(table)
                 if wandb.run is not None and self.accelerator.is_main_process:
                     if not hasattr(self, "wandb_table"):
                         self.wandb_table = wandb.Table(dataframe=df)
                     else:
-                        self.wandb_table.add_data(df)
-
-                    # print("Logging prompts and completions to wandb")
-                    wandb.log({"completions": self.wandb_table})
+                        # Combine with existing data
+                        combined_df = pd.concat([self.wandb_table.get_dataframe(), df])
+                        self.wandb_table = wandb.Table(dataframe=combined_df)
+                        
+                    if self.state.global_step % 50 == 0:
+                        # print("Logging prompts and completions to wandb")
+                        wandb.log({f"training_records": self.wandb_table})
 
 
             all_stages_inputs.append(

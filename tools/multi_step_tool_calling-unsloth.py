@@ -1,6 +1,6 @@
 # network
 import os
-os.environ["https_proxy"] = "http://192.168.1.12:7891"
+os.environ["https_proxy"] = "http://192.168.1.22:7890"
 # os.environ["UNSLOTH_COMPILE_DISABLE"] = "1"
 # fallback
 import coredumpy
@@ -196,7 +196,7 @@ if __name__ == "__main__":
             dependent_tool_calling_reward_func,
             log_func_multi_step,
             # saver_content_reward_func,
-            # saver_filetype_reward_func
+            saver_filetype_reward_func
             
         ],
         args=train_args,
