@@ -1,27 +1,25 @@
 [project]
-name = "ink-agent-multi-step"
+name = "frugal-agent"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10.15"
 dependencies = [
-    "accelerate>=1.6.0",
-    "bitsandbytes>=0.45.4",
-    "coredumpy>=0.4.3",
-    "datasets>=3.5.0",
-    "debugpy>=1.8.13",
-    "google>=3.0.0",
-    "openai>=1.70.0",
-    "peft>=0.15.1",
-    "rich>=14.0.0",
-    "setuptools>=78.1.0",
-    "transformers>=4.46.0",
+    "accelerate==1.3.0",
+    "bitsandbytes>=0.46.0",
+    "datasets>=3.6.0",
+    "debugpy>=1.8.14",
+    "flash-attn>=2.8.0.post2",
+    "ipykernel>=6.29.5",
+    "peft>=0.15.2",
+    "torch==2.5.1",
+    "transformers==4.49.0",
     "trl",
     "unsloth",
     "unsloth-zoo>=2025.3.1",
-    "vllm==0.8.2",
+    "vllm",
+    "wandb>=0.20.1",
 ]
 
 [tool.uv.sources]
-trl = { path = "trl", editable = true }
-unsloth = { path = "unsloth", editable = true }
+vllm = { path = "third_party/vllm", editable = true }
+trl = { path = "third_party/trl", editable = true }
+unsloth = { path = "third_party/unsloth", editable = true }

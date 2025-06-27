@@ -1,17 +1,12 @@
 # network
-import os
-os.environ["https_proxy"] = "http://192.168.1.22:7890"
-# os.environ["UNSLOTH_COMPILE_DISABLE"] = "1"
-# fallback
-import coredumpy
-# Create a dump in "./dumps" when there's an unhandled exception
-coredumpy.patch_except(directory='./dumps')
 # unsloth needs to be import before importing trl
 from unsloth import FastLanguageModel
 import torch
 import re
 import json
 import argparse
+import os
+
 from datasets import load_dataset, Dataset
 from trl import GRPOConfig, GRPOTrainer
 from typing import List, Dict, Any, Tuple, Sequence
@@ -115,7 +110,39 @@ def get_alpaca_instruction_response_pairs(split = "train")->Dataset:
     dataset = dataset.map(formatting_prompts_func, batched = False)
     return dataset
 
+                
+def get_natural_thinking_dataset(url, split="train", output_file="dataset.json", required_num_data=3500):
+    dataset = load_dataset(url, split=split)
+    dataset = dataset.shuffle(seed=42).select(range(min(50000, len(dataset))))  # Ensure we get up to 1000 samples
+    
+    def check_length(text):
+        text_lenth = len(text["responses"][0]['response'])
+        return (text_lenth > 50) and (text_lenth < 2000)
+    
+    dataset = dataset.filter(check_length)
+    
+    def formatting_prompts_func(examples):
+        instruction = examples["question"]
+        output = examples["responses"][0]["response"]
+        
+        return {
+            'prompt': [
+                {'role': 'system', 'content': SYSTEM_PROMPT},
+                {'role': 'user', 'content': instruction},
+            ],
+            'response': output
+        }
+    
+    dataset = dataset.map(formatting_prompts_func, batched=False)
+    # dataset = dataset.shuffle(seed=42).select(range(min(required_num_data, len(dataset))))  # Ensure we get up to 1000 samples
+    # dataset = dataset.remove_columns([col for col in dataset.column_names if col != "prompt"])
+    print("\033[92m number of data: \033[0m", len(dataset))
+    
+    return dataset
+
+
 dataset = get_alpaca_instruction_response_pairs()
+# dataset = get_natural_thinking_dataset("facebook/natural_reasoning", "train", "facebook_natural_reasoning-markhdown.json")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -135,6 +162,9 @@ if __name__ == "__main__":
         max_lora_rank=lora_rank,
         gpu_memory_utilization=0.7,
     )
+    
+    # override the original chat template
+    # tokenizer.chat_template = Ink_QWEN_DEPENDENT_TOOL_CALL_TEMPLATE
     
     model = FastLanguageModel.get_peft_model(
         model,

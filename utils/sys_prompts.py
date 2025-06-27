@@ -534,3 +534,21 @@ When calling multiple tools where one tool's output is needed as input for anoth
 {"name": "tool_2", "arguments": {"arg1": "{1.output}"}, "call_sequence_id": 2}
 </tool_call>
 """
+
+MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_GENERAL_FEWSHOT = [
+{
+   "role": "user",
+   "content": "call tool_1 and then call tool_2 with the output of tool_1"
+},
+{
+   "role": "assistant", 
+   "content": """\
+<tool_call>
+{"name": "tool_1", "arguments": {"arg1": "value1"}, "call_sequence_id": 1}
+</tool_call>
+<tool_call>
+{"name": "tool_2", "arguments": {"arg1": "{1.output}"}, "call_sequence_id": 2}
+</tool_call>
+"""
+}
+]

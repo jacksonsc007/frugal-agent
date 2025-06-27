@@ -202,7 +202,7 @@ def grpo_accumulated_loss(
             trainer.accelerator.scaler,
             n_chunks, 
         )
-        print(f"\033[95m[EfficientGRPO] loss={loss} \033[0m")
+        # print(f"\033[95m[EfficientGRPO] loss={loss} \033[0m")
         return loss, completion_length, mean_kl
 
         # Old non efficient code path
@@ -937,16 +937,16 @@ class _UnslothGRPOTrainer(Trainer):
     def _prepare_inputs(self, inputs: dict[str, Union[torch.Tensor, Any]]) -> dict[str, Union[torch.Tensor, Any]]:
         device = self.accelerator.device
         prompts = [x["prompt"] for x in inputs]
-        prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
-        prompt_inputs = self.processing_class(
-            prompts_text, return_tensors="pt", padding=True, padding_side="left", add_special_tokens=False
-        )
-        prompt_inputs = super()._prepare_inputs(prompt_inputs)
-        prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
+        # prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
+        # prompt_inputs = self.processing_class(
+        #     prompts_text, return_tensors="pt", padding=True, padding_side="left", add_special_tokens=False
+        # )
+        # prompt_inputs = super()._prepare_inputs(prompt_inputs)
+        # prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
 
-        if self.max_prompt_length is not None:
-            prompt_ids = prompt_ids[:, -self.max_prompt_length :]
-            prompt_mask = prompt_mask[:, -self.max_prompt_length :]
+        # if self.max_prompt_length is not None:
+        #     prompt_ids = prompt_ids[:, -self.max_prompt_length :]
+        #     prompt_mask = prompt_mask[:, -self.max_prompt_length :]
 
         # Generate completions using either vLLM or regular generation
         if self.args.use_vllm:
@@ -957,7 +957,7 @@ class _UnslothGRPOTrainer(Trainer):
 
             # Generate completions using vLLM: gather all prompts and use them in a single call in the main process
             all_prompts = gather_object(prompts)
-            all_prompts_text = gather_object(prompts_text)
+            # all_prompts_text = gather_object(prompts_text)
             if self.accelerator.is_main_process:
                 if self.env is not None:
                     # prompt_completion_pairs = self.env.generate(
@@ -1127,7 +1127,7 @@ class _UnslothGRPOTrainer(Trainer):
                         combined_df = pd.concat([self.wandb_table.get_dataframe(), df])
                         self.wandb_table = wandb.Table(dataframe=combined_df)
                         
-                    if self.state.global_step % 50 == 0:
+                    if self.state.global_step % 500 == 0:
                         # print("Logging prompts and completions to wandb")
                         wandb.log({f"training_records": self.wandb_table})
 
@@ -1200,9 +1200,11 @@ class _UnslothGRPOTrainer(Trainer):
                 mode = "eval" if self.control.should_evaluate else "train"
                 self._metrics[mode][f"completion_length-stage_{stage_id}"].append(completion_length.item())
                 self._metrics[mode][f"kl-stage_{stage_id}"].append(mean_kl.item())
+                self._metrics[mode][f"global_step"].append(self.state.global_step)
             else:
                 self._metrics[f"completion_length-stage_{stage_id}"].append(completion_length.item())
                 self._metrics[f"kl-stage_{stage_id}"].append(mean_kl.item())
+                self._metrics[f"global_step"].append(self.state.global_step)
 
         loss = sum(total_loss) / len(total_loss)
         return loss

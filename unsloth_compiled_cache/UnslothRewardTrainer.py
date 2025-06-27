@@ -1,6 +1,6 @@
 """
-2025.3.17
-2025.3.19
+2025.6.6
+2025.3.11
 4.49.0
 0.16.0.dev0
 __UNSLOTH_VERSIONING__
@@ -710,8 +710,9 @@ class UnslothRewardTrainer(_UnslothRewardTrainer):
         use_fp16 = getattr(args, 'fp16', False)
         force_float32 = False
         if os.environ.get('UNSLOTH_FORCE_FLOAT32', '0') == '1':
-            print('Unsloth: Switching to float32 training since model cannot work with float16')
-            force_float32 = True
+            if use_bf16 or use_fp16:
+                print('Unsloth: Switching to float32 training since model cannot work with float16')
+                force_float32 = True
         mixed_precision_dtype = os.environ.get('UNSLOTH_MIXED_PRECISION', 'float32')
         dtype = getattr(model.config, 'torch_dtype', None)
         if dtype is None: dtype = model.get_input_embeddings().dtype

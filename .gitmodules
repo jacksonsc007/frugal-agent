@@ -1,0 +1,9 @@
+[submodule "third_party/unsloth"]
+	path = third_party/unsloth
+	url = https://github.com/jacksonsc007/unsloth.git
+[submodule "third_party/trl"]
+	path = third_party/trl
+	url = https://github.com/jacksonsc007/trl
+[submodule "third_party/vllm"]
+	path = third_party/vllm
+	url = https://github.com/jacksonsc007/vllm

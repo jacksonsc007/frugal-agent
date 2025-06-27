@@ -145,7 +145,7 @@ class UnslothDDPOConfig(DDPOConfig):
     )
     def __init__(
         self,
-        exp_name = 'multi_step_tool_calling-unsloth',
+        exp_name = 'inference_and_save_lora-unsloth',
         run_name = '',
         seed = 3407,
         log_with = None,

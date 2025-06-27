@@ -307,6 +307,7 @@ from .arsenal import try_invoke_tool_calls, try_parse_tool_calls
 
 def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:
     """
+    0. Only target at calling formatter and saver, for now.
     1. Basic tool calling
        json_format_reward : json format is correct;
        valid_invoke_reward: tool calling is valid.
@@ -331,11 +332,12 @@ def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs)
         tool_number_reward = 0
         json_format_reward = 0
         valid_invoke_reward = 0
-        tool_specific_reward = 0
+        call_id_correctness = 0
+        ir_content_correctness = 0
         
         output = try_parse_tool_calls(text)
-        invoke_result, tool_names, tool_args = try_invoke_tool_calls(output)
-        print(invoke_result)
+        invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output)
+        # print(invoke_result)
         if len(invoke_result) > 0 and (all(invoke_result)):
             valid_invoke_reward = 0.5
         if tool_calls :=output.get("tool_calls"):
@@ -344,39 +346,44 @@ def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs)
                 tool_number_reward = 0.5
             if all(t.get('function', {}).get('call_sequence_id', None) for t in tool_calls):
                 call_sequence_id_awareness_reward = 0.5
-        # NOTE: we find the model hard to understand the intermediate representation, so if it show up
-        # we give it reward
-        if match := re.search(r"\{\d+\.output\}", text):
-            ir_awareness_reward = 0.5
-            # print("\033[96m[Congrats] intermediate representation appears! \033[0m")
+        # NOTE: we find the model hard to understand the intermediate representation. To encourage 
+        # the model to use as more intermediate representation as possible, we offer reward aggressively
+        all_match = re.findall(r"\{(\d+)\.output\}", text)
+        if len(all_match) > 0:
+            ir_awareness_reward = 0.5 * min(len(all_match), 2)
+        # print("\033[96m[Congrats] intermediate representation appears! \033[0m")
         
-        for name, arg in zip(tool_names, tool_args):
-            arg_str = json.dumps(arg, indent=2)
-            if name == "format_organizer":
-                # if the tool is formatter, we should not see ir
-                # if not re.search(r"\{\d+\.output\}", arg_str):
-                # NOTE: ir should not appear in formatter, we limit the shortest length in the arguments
-                # if not re.search(r"\{.*\}", arg_str) and not re.search(r"tool_response", arg_str):
-                match = re.search(r"\"response\": \"(.+?)\"", arg_str)
-                if match and (len(match.group(1)) > 50):
-                    tool_specific_reward += 0.5
-            if name == "save_file":
-                # if the tool is saver, we should see ir
-                if re.search(r"\{\d+\.output\}", arg_str):
-                    tool_specific_reward += 0.5
-        reward = call_sequence_id_awareness_reward + ir_awareness_reward + tool_number_reward + json_format_reward + valid_invoke_reward + tool_specific_reward
-        if False:
-            import pandas as pd
-            reward_summary = {
-                    "call_sequence_id_awareness_reward": call_sequence_id_awareness_reward,
-                    "ir_awareness_reward": ir_awareness_reward,
-                    "tool_number_reward": tool_number_reward,
-                    "json_format_reward": json_format_reward,
-                    "valid_invoke_reward": valid_invoke_reward,
-                    "tool_specific_reward": tool_specific_reward,
-                }
-            reward_table = pd.DataFrame(list(reward_summary.items()), columns=["Reward Type", "Value"])
-            print(reward_table)
+        # ensure call both format_organizer and save_file
+        if tool_names == ["format_organizer", "save_file"] or tool_names == ["save_file", "format_organizer"]:
+            for name, arg, t in zip(tool_names, tool_args, tool_calls):
+                arg_str = json.dumps(arg, indent=2)
+                if name == "format_organizer":
+                    if t.get('function', {}).get('call_sequence_id', -1) == 2:
+                        call_id_correctness += 0.5
+                    # if the tool is formatter, we should not see ir
+                    # NOTE: to discourage formatter to use {tool_reponse} to slack off
+                    match = re.search(r"\{(.+?)\}", arg_str)
+                    if match and match.group(1) == "1.output":
+                        ir_content_correctness += 0.5
+                    # NOTE: we find formatter sometimes use "1.response" to refer to the intermediate representation
+                    # Despite the format is not correct, we should encourage this behavior
+                    elif match and match.group(1) == "1.response":
+                        ir_content_correctness += 0.35
+                    # if the content of response is less than 88 characters, we assume the model adopts another way
+                    # to use the intermediate representation, we also encourage this behavior 
+                    elif arg.get('response') and len(arg['response']) < 88:
+                        ir_content_correctness += 0.15
+                elif name == "save_file":
+                    if t.get('function', {}).get('call_sequence_id', -1) == 3:
+                        call_id_correctness += 0.5
+                    match = re.search(r"\{(.+?)\}", arg_str)
+                    if match and match.group(1) == "2.output":
+                        ir_content_correctness += 0.5
+                    elif match and match.group(1) == "1.response":
+                        ir_content_correctness += 0.25
+                    elif arg.get('content') and len(arg['content']) < 88:
+                        ir_content_correctness += 0.25
+        reward = call_sequence_id_awareness_reward + ir_awareness_reward + tool_number_reward + json_format_reward + valid_invoke_reward + call_id_correctness + ir_content_correctness
         return reward
 
     rewards = []
@@ -387,8 +394,9 @@ def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs)
 
 def ordinary_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:
     """
+    0. Only target at question_answer_expert for now.
     1. If the tools called are correct
-    2. make sure there is no call_sequence_id in the tool calls
+    2. tool call should contain call_sequence_id
     """
     responses = [completion[0]['content'] for completion in completions]
     # this reward function does not function for dependent tool calling
@@ -399,23 +407,22 @@ def ordinary_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) 
         json_format_reward =0
         valid_invoke_reward = 0
         correct_tool_reward = 0
-        is_ordinary_tool_call = False
+        tool_call_id_awareness = 0
+        tool_call_id_correctness = 0
+
         output = try_parse_tool_calls(text)
         if output.get("tool_calls"):
             json_format_reward = 0.5
-            if not any(tool_call.get("function").get("call_sequence_id") for tool_call in output.get("tool_calls")):
-                is_ordinary_tool_call = True
-        else:
-            return 0.0
-        if is_ordinary_tool_call:
-            invoke_result, tool_names, _ = try_invoke_tool_calls(output)
+            if all(tool_call.get("function").get("call_sequence_id") for tool_call in output.get("tool_calls")):
+                tool_call_id_awareness = 0.5
+                if all(tool_call.get("function").get("call_sequence_id") == 1 for tool_call in output.get("tool_calls")):
+                    tool_call_id_correctness = 0.5
+            invoke_result, tool_names, _, _, _ = try_invoke_tool_calls(output)
             if (all(invoke_result)):
                 valid_invoke_reward = 0.5
-                # evaluate if the tool is correctly called
-                if (stage_id == 0):
-                    if all(tool_name == "question_answer_expert" for tool_name in tool_names):
-                        correct_tool_reward = 0.5
-        reward = json_format_reward + valid_invoke_reward + correct_tool_reward
+                if all(tool_name == "question_answer_expert" for tool_name in tool_names):
+                    correct_tool_reward = 0.5
+        reward = json_format_reward + valid_invoke_reward + correct_tool_reward + tool_call_id_awareness + tool_call_id_correctness
         return reward
 
     rewards = []
@@ -436,7 +443,7 @@ def saver_filetype_reward_func(prompts, completions, stage_id, **kwargs) -> list
     def func_(prompts, text):
         markdown_filetype_reward = 0
         output = try_parse_tool_calls(text)
-        invoke_result, tool_names, tool_args = try_invoke_tool_calls(output)
+        invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output)
         for idx, tool_name in enumerate(tool_names):
             if tool_name == "save_file":
                 file_name = tool_args[idx]["file_name"]

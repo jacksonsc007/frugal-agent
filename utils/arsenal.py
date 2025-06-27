@@ -17,7 +17,27 @@ def question_answer_expert(
         str: The detailed answer to the question.
     """
     # print("\033[96m[TOOL] question_answer_expert tool is called \033[0m")
-    return "question_answer_expert is not initialized"
+    # return "question_answer_expert is not initialized"
+    # return "The main theme of *'The Most Dangerous Game'* by Richard Connell is **the thin line between civilization and savagery**. The story explores how quickly societal morals can be stripped away when survival is at stake. It questions the ethics of hunting for sport by turning the tables—making a human the prey—and shows how even the most refined individuals can become savage when pushed to the brink. It also delves into themes of **power, violence, and the instinct for self-preservation**."
+    return """
+
+Dispatch width refers to the number of instructions a processor can issue (send to execution units) in a single clock cycle. It's a crucial factor determining a processor's instruction-level parallelism (ILP) capabilities and, consequently, its performance.
+
+Here's a breakdown:
+
+    Issuing Instructions: Modern processors don't simply execute instructions in the exact order they appear in the program. They try to find independent instructions and execute them concurrently to improve speed. This process of selecting and sending instructions to available execution units (like ALUs, FPUs, load/store units) is called "issuing" or "dispatching."
+
+    Dispatch Width as a Limit: The dispatch width defines the maximum number of instructions that can be issued simultaneously. A processor with a dispatch width of 4 can, at most, issue four instructions in one clock cycle. It might issue fewer if there aren't enough independent instructions ready for execution or if there are resource conflicts (e.g., multiple instructions needing the same execution unit).
+
+    Impact on Performance: A wider dispatch width generally leads to higher performance because the processor can exploit more ILP. It can keep more execution units busy and complete more work per clock cycle. However, simply increasing dispatch width isn't a magic bullet. Other factors like instruction dependencies, branch prediction accuracy, and memory access latency also play significant roles.
+
+    Relationship to Other Terms:
+        Superscalar Architecture: Processors that can dispatch more than one instruction per cycle are called superscalar. Dispatch width is a key characteristic of superscalar processors.
+        Instruction Pipeline: Instructions are processed in a pipeline, going through stages like fetch, decode, issue, execute, and write-back. The dispatch stage is where the processor decides which instructions are ready to move forward in the pipeline.
+        Issue Width vs. Retire Width: Issue width (dispatch width) refers to how many instructions enter the execution phase per cycle. Retire width refers to how many instructions complete and write back their results per cycle. Ideally, these should be similar, but they don't have to be identical.
+
+In summary, dispatch width is a measure of a processor's ability to exploit instruction-level parallelism by simultaneously issuing multiple instructions to execution units. A wider dispatch width generally indicates a more powerful processor, although overall performance depends on various other architectural features and program characteristics.
+"""
 
 def format_organizer(
     instruction: Annotated[str, "The instruction users input"],
@@ -32,7 +52,28 @@ def format_organizer(
         str: The organized instruction and response pairs.
     """
     # print("\033[96m[TOOL] format_organizer tool is called \033[0m")
-    return "format organizer is not initialized"
+    # return "format organizer is not initialized"
+    # return "The formatted content is: The main theme of *'The Most Dangerous Game'* by Richard Connell is **the thin line between civilization and savagery**. The story explores how quickly societal morals can be stripped away when survival is at stake. It questions the ethics of hunting for sport by turning the tables—making a human the prey—and shows how even the most refined individuals can become savage when pushed to the brink. It also delves into themes of **power, violence, and the instinct for self-preservation**."
+    return """
+---
+Dispatch width refers to the number of instructions a processor can issue (send to execution units) in a single clock cycle. It's a crucial factor determining a processor's instruction-level parallelism (ILP) capabilities and, consequently, its performance.
+
+Here's a breakdown:
+
+    Issuing Instructions: Modern processors don't simply execute instructions in the exact order they appear in the program. They try to find independent instructions and execute them concurrently to improve speed. This process of selecting and sending instructions to available execution units (like ALUs, FPUs, load/store units) is called "issuing" or "dispatching."
+
+    Dispatch Width as a Limit: The dispatch width defines the maximum number of instructions that can be issued simultaneously. A processor with a dispatch width of 4 can, at most, issue four instructions in one clock cycle. It might issue fewer if there aren't enough independent instructions ready for execution or if there are resource conflicts (e.g., multiple instructions needing the same execution unit).
+
+    Impact on Performance: A wider dispatch width generally leads to higher performance because the processor can exploit more ILP. It can keep more execution units busy and complete more work per clock cycle. However, simply increasing dispatch width isn't a magic bullet. Other factors like instruction dependencies, branch prediction accuracy, and memory access latency also play significant roles.
+
+    Relationship to Other Terms:
+        Superscalar Architecture: Processors that can dispatch more than one instruction per cycle are called superscalar. Dispatch width is a key characteristic of superscalar processors.
+        Instruction Pipeline: Instructions are processed in a pipeline, going through stages like fetch, decode, issue, execute, and write-back. The dispatch stage is where the processor decides which instructions are ready to move forward in the pipeline.
+        Issue Width vs. Retire Width: Issue width (dispatch width) refers to how many instructions enter the execution phase per cycle. Retire width refers to how many instructions complete and write back their results per cycle. Ideally, these should be similar, but they don't have to be identical.
+
+In summary, dispatch width is a measure of a processor's ability to exploit instruction-level parallelism by simultaneously issuing multiple instructions to execution units. A wider dispatch width generally indicates a more powerful processor, although overall performance depends on various other architectural features and program characteristics.
+"""
+
 
 
 def save_file(
@@ -190,7 +231,9 @@ def try_parse_intermediate_representation(args, dependent_tool_output_dict):
                 call_sequence_id = int(match.group(1))
                 call_output = dependent_tool_output_dict.get(call_sequence_id, None)
                 if call_output is None:
-                    Warning(f"output for call id {call_sequence_id} missing, please check the tool call sequence.")
+                    Warning(f"Output for call id {call_sequence_id} missing")
+                else:
+                    Warning(f"Found output for call id {call_sequence_id} in the record.")
                 args[key] = re.sub(
                     r'\{(\d+)\.output\}',
                     call_output,
@@ -198,15 +241,22 @@ def try_parse_intermediate_representation(args, dependent_tool_output_dict):
                 )
     return args
 
-def try_invoke_tool_calls(assistant_message: dict):
+def try_invoke_tool_calls(assistant_message: dict, dependent_tool_output_dict: dict = {}):
     tool_call_valid = []
     tool_name = []
     tool_args = []
+    tool_responses = []
+    tool_call_ids = []
     if "tool_calls" in assistant_message:
         for tool_call in assistant_message["tool_calls"]:
             try:
                 fn_name = tool_call["function"]["name"]
-                fn_args = json.loads(tool_call["function"]["arguments"], strict=False)
+                if isinstance(tool_call["function"]["arguments"], dict):
+                    fn_args = tool_call["function"]["arguments"]
+                else:
+                    DeprecationWarning(f"In this version, tool call {tool_call} is using dict for arguments rather than string")
+                    fn_args = json.loads(tool_call["function"]["arguments"], strict=False)
+                call_sequence_id = tool_call["function"].get("call_sequence_id", None)
             except Exception as e:
                 print(f"Error parsing tool call {tool_call}\n {e}")
                 tool_call_valid.append(False)
@@ -214,18 +264,25 @@ def try_invoke_tool_calls(assistant_message: dict):
             try:
                 # Execute tool
                 fn = get_function_by_name(fn_name)
+                fn_args = try_parse_intermediate_representation(fn_args, dependent_tool_output_dict)
                 # fn_result = json.dumps(fn(**fn_args))
                 # NOTE: the output is string for now
                 fn_result = (fn(**fn_args))
                 tool_call_valid.append(True)
                 tool_name.append(fn_name)
                 tool_args.append(fn_args)
+                tool_responses.append(fn_result)
+                tool_call_ids.append(call_sequence_id)
+                if call_sequence_id is not None:
+                    if call_sequence_id in dependent_tool_output_dict:
+                        raise ValueError(f"Duplicate call_sequence_id: {call_sequence_id}")
+                    dependent_tool_output_dict[call_sequence_id] = fn_result
                 # Append tool response to state
             except Exception as e:
                 print(f"Error: Failed to invoke tool {fn_name} with arguments {fn_args}: {e}")
                 tool_call_valid.append(False)
                 continue
-    return tool_call_valid, tool_name, tool_args
+    return tool_call_valid, tool_name, tool_args, tool_call_ids, tool_responses
 
 if __name__ == "__main__":
     debug = True

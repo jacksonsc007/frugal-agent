@@ -1,6 +1,6 @@
 """
-2025.3.17
-2025.3.19
+2025.6.6
+2025.3.11
 4.49.0
 0.16.0.dev0
 __UNSLOTH_VERSIONING__
@@ -9,7 +9,7 @@ from torch import Tensor
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from trl.trainer.dpo_trainer import (Any, AutoModelForCausalLM, BaseImageProcessor, Callable, DPOConfig, DPOTrainer, DataCollator, DataCollatorForPreference, DataLoader, Dataset, EvalLoopOutput, F, FDivergenceConstants, FDivergenceType, FeatureExtractionMixin, IterableDataset, Literal, MODEL_FOR_VISION_2_SEQ_MAPPING_NAMES, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, ProcessorMixin, RunningMoments, SyncRefModelCallback, Trainer, TrainerCallback, Union, amp, cap_exp, contextmanager, create_reference_model, dataclass, deepcopy, deepspeed, defaultdict, deprecate_kwarg, disable_dropout_in_model, empty_cache, flush_left, generate_model_card, get_comet_experiment_url, inspect, is_comet_available, is_peft_available, is_torch_xpu_available, is_wandb_available, log_table_to_comet_experiment, maybe_apply_chat_template, maybe_extract_prompt, nn, nullcontext, os, pad, pad_to_length, pd, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, textwrap, torch, tqdm, transformers, version, wandb, warnings)
+from trl.trainer.dpo_trainer import (Any, AutoModelForCausalLM, BaseImageProcessor, Callable, DPOConfig, DPOTrainer, DataCollator, DataCollatorForPreference, DataLoader, Dataset, EvalLoopOutput, F, FDivergenceConstants, FDivergenceType, FeatureExtractionMixin, IterableDataset, Literal, MODEL_FOR_VISION_2_SEQ_MAPPING_NAMES, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, ProcessorMixin, RunningMoments, SyncRefModelCallback, Trainer, TrainerCallback, Union, amp, cap_exp, contextmanager, create_reference_model, dataclass, deepcopy, defaultdict, deprecate_kwarg, disable_dropout_in_model, empty_cache, flush_left, generate_model_card, get_comet_experiment_url, inspect, is_comet_available, is_peft_available, is_torch_xpu_available, is_wandb_available, log_table_to_comet_experiment, maybe_apply_chat_template, maybe_extract_prompt, nn, nullcontext, os, pad, pad_to_length, pd, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, textwrap, torch, tqdm, transformers, version, wandb, warnings)
 
 
 import os
@@ -1971,8 +1971,9 @@ class UnslothDPOTrainer(_UnslothDPOTrainer):
         use_fp16 = getattr(args, 'fp16', False)
         force_float32 = False
         if os.environ.get('UNSLOTH_FORCE_FLOAT32', '0') == '1':
-            print('Unsloth: Switching to float32 training since model cannot work with float16')
-            force_float32 = True
+            if use_bf16 or use_fp16:
+                print('Unsloth: Switching to float32 training since model cannot work with float16')
+                force_float32 = True
         mixed_precision_dtype = os.environ.get('UNSLOTH_MIXED_PRECISION', 'float32')
         dtype = getattr(model.config, 'torch_dtype', None)
         if dtype is None: dtype = model.get_input_embeddings().dtype

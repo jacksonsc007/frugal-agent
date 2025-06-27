@@ -1,6 +1,6 @@
 """
-2025.3.17
-2025.3.19
+2025.6.6
+2025.3.11
 4.49.0
 0.16.0.dev0
 __UNSLOTH_VERSIONING__
@@ -9,7 +9,7 @@ from torch import Tensor
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from trl.trainer.bco_trainer import (Any, AutoModelForCausalLM, BCOConfig, BCOTrainer, BaseImageProcessor, CLF_NAME, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalLoopOutput, F, FeatureExtractionMixin, Literal, LogisticRegression, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, ProcessorMixin, RUNNING_NAME, RunningMoments, SequentialSampler, Trainer, TrainerCallback, TrainingArguments, Union, _process_tokens, _tokenize, amp, contextmanager, create_reference_model, deepcopy, deepspeed, defaultdict, disable_dropout_in_model, generate_model_card, get_comet_experiment_url, has_length, inspect, is_comet_available, is_peft_available, is_sklearn_available, is_wandb_available, itemgetter, log_table_to_comet_experiment, maybe_apply_chat_template, nn, np, nullcontext, os, pad_to_length, pd, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, textwrap, torch, tqdm, transformers, version, wandb, warnings, F, Optional, PeftModel, PreTrainedModel, Trainer, is_peft_available, os, torch)
+from trl.trainer.bco_trainer import (Any, AutoModelForCausalLM, BCOConfig, BCOTrainer, BaseImageProcessor, CLF_NAME, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalLoopOutput, F, FeatureExtractionMixin, Literal, Optional, PartialState, PeftModel, PreTrainedModel, PreTrainedModelWrapper, PreTrainedTokenizerBase, ProcessorMixin, RUNNING_NAME, RunningMoments, SequentialSampler, Trainer, TrainerCallback, TrainingArguments, Union, _process_tokens, _tokenize, amp, contextmanager, create_reference_model, deepcopy, defaultdict, disable_dropout_in_model, generate_model_card, get_comet_experiment_url, has_length, inspect, is_comet_available, is_peft_available, is_sklearn_available, is_wandb_available, itemgetter, log_table_to_comet_experiment, maybe_apply_chat_template, nn, np, nullcontext, os, pad_to_length, pd, peft_module_casting_to_bf16, prepare_model_for_kbit_training, random, textwrap, torch, tqdm, transformers, version, wandb, warnings, F, Optional, PeftModel, PreTrainedModel, Trainer, is_peft_available, os, torch)
 
 
 import os
@@ -1710,8 +1710,9 @@ class UnslothBCOTrainer(_UnslothBCOTrainer):
         use_fp16 = getattr(args, 'fp16', False)
         force_float32 = False
         if os.environ.get('UNSLOTH_FORCE_FLOAT32', '0') == '1':
-            print('Unsloth: Switching to float32 training since model cannot work with float16')
-            force_float32 = True
+            if use_bf16 or use_fp16:
+                print('Unsloth: Switching to float32 training since model cannot work with float16')
+                force_float32 = True
         mixed_precision_dtype = os.environ.get('UNSLOTH_MIXED_PRECISION', 'float32')
         dtype = getattr(model.config, 'torch_dtype', None)
         if dtype is None: dtype = model.get_input_embeddings().dtype

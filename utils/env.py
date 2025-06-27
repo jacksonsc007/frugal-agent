@@ -9,7 +9,8 @@ from collections import defaultdict
 import sys
 sys.path.append(".")
 from utils.sys_prompts import IT_SYS_PROMPT_deepseek_concise_2 as SYSTEM_PROMPT_FORMATTER
-from utils.sys_prompts import MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_3
+from utils.sys_prompts import MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_3, MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_GENERAL_FEWSHOT
+from utils.chat_template import Ink_QWEN_DEPENDENT_TOOL_CALL_TEMPLATE as vllm_chat_template
 
 
 class ToolCallingEnv:
@@ -30,7 +31,7 @@ class ToolCallingEnv:
         data: List[Dict],
         lora_request: LoRARequest
     ) -> Tuple[List[Dict[str, Any]], List[RequestOutput]]:
-        chat_with_tools = partial(llm.chat, sampling_params=sampling_params, tools=self.tools, lora_request=lora_request)
+        chat_with_tools = partial(llm.chat, sampling_params=sampling_params, tools=self.tools, lora_request=lora_request, chat_template=vllm_chat_template)
         # the initial prompt as the first tool_calling request
         # the prompt must be same
         if not all([d == data[0] for d in data]):
@@ -45,23 +46,11 @@ class ToolCallingEnv:
         # init system prompt
         for s in states:
             s['messages'].append(sys_prompt)
-            s['messages'].append(sys_prompt_for_dependent_tool_calls)
+            # s['messages'].append(sys_prompt_for_dependent_tool_calls)
             # here is few-shot examples
-            use_few_shot = True
+            use_few_shot = False
             if use_few_shot:
-                s['messages'].extend(
-[
-                    {"role": "user", "content": "call tool_1 and then call tool_2 with the output of tool_1"},
-                    {"role": "assistant", "content": """<tool_call>
-{"name": "tool_1", "arguments": {"arg1": "value1"}, "call_sequence_id": 1}
-</tool_call>
-<tool_call>
-{"name": "tool_2", "arguments": {"arg1": "{1.output}"}, "call_sequence_id": 2}
-</tool_call>
-"""
-}
-]
-                )
+                s['messages'].extend(MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_GENERAL_FEWSHOT)
 #                 s['messages'].extend(
 #                     [
 #                         {
@@ -205,7 +194,9 @@ class ToolCallingEnv:
                     fn_args = json.loads(tool_call["function"]["arguments"], strict=False)
                     call_sequence_id =tool_call["function"].get("call_sequence_id")
                     if call_sequence_id is not None and not isinstance(call_sequence_id, int):
-                        print(f"\033[96m[Error] tool call id should be of type int, but we got {call_sequence_id} Please check the parsing logic. \033[0m")
+                        print(f"\033[96m[Error] tool call id should be of type int, but we got {type(call_sequence_id)} Please check the parsing logic. \033[0m")
+                        print(call_sequence_id)
+                        
                 except Exception as e:
                     print(f"Error parsing tool call {tool_call}\n {e}")
                     continue
