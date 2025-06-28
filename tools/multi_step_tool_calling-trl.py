@@ -26,8 +26,6 @@ debug = False
 
 import os
 
-os.environ["https_proxy"] = "http://192.168.1.12:7891"
-
 if debug:
     # improve torch tensor printing
     import torch
