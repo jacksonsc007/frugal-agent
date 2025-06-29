@@ -1267,28 +1267,10 @@ class _UnslothGRPOTrainer(Trainer):
             else:
                 completions = completions_text
 
-            rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
-            for i, (reward_func, reward_processing_class) in enumerate(
-                zip(self.reward_funcs, self.reward_processing_classes)
-            ):
-                if isinstance(reward_func, nn.Module):  # Module instead of PretrainedModel for compat with compiled models
-                    if is_conversational(inputs[0]):
-                        messages = [{"messages": p + c} for p, c in zip(prompts, completions)]
-                        texts = [apply_chat_template(x, reward_processing_class)["text"] for x in messages]
-                    else:
-                        texts = [p + c for p, c in zip(prompts, completions)]
-                    reward_inputs = reward_processing_class(
-                        texts, return_tensors="pt", padding=True, padding_side="right", add_special_tokens=False
-                    )
-                    reward_inputs = super()._prepare_inputs(reward_inputs)
-                    with torch.inference_mode(), torch.amp.autocast(device_type = 'cuda', dtype = torch.float16 if os.environ.get('ACCELERATE_MIXED_PRECISION', 'fp16') == 'fp16' else torch.bfloat16) if not torch.is_autocast_enabled('cuda') else nullcontext():
-                        rewards_per_func[:, i] = reward_func(**reward_inputs).logits[:, 0]  # Shape (B*G,)
-                else:
-                    # Repeat all input columns (but "prompt" and "completion") to match the number of generations
-                    keys = [key for key in inputs[0] if key not in ["prompt", "completion"]]
-                    reward_kwargs = {key: [example[key] for example in inputs] for key in keys}
-                    output_reward_func = reward_func(prompts=prompts, completions=completions, **reward_kwargs, stage_id=stage_id)
-                    rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
+            rewards_tmp = prompt_completion_pairs[stage_id].get("rewards", None)
+            reward_functions_tmp = prompt_completion_pairs[stage_id].get("reward_functions", None)
+
+            rewards_per_func = rewards_tmp
 
             # Gather the reward per function: this part is crucial, because the rewards are normalized per group and the
             # completions may be distributed across processes
@@ -1315,7 +1297,7 @@ class _UnslothGRPOTrainer(Trainer):
 
             # Log the metrics
             reward_per_func = rewards_per_func.mean(0)
-            for i, reward_func in enumerate(self.reward_funcs):
+            for i, reward_func in enumerate(reward_functions_tmp):
                 if isinstance(reward_func, nn.Module):  # Module instead of PretrainedModel for compat with compiled models
                     reward_func_name = reward_func.config._name_or_path.split("/")[-1]
                 else:

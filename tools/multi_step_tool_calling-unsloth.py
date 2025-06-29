@@ -1,4 +1,3 @@
-# network
 # unsloth needs to be import before importing trl
 from unsloth import FastLanguageModel
 import torch
@@ -6,143 +5,37 @@ import re
 import json
 import argparse
 import os
-
-from datasets import load_dataset, Dataset
-from trl import GRPOConfig, GRPOTrainer
-from typing import List, Dict, Any, Tuple, Sequence
-from vllm import LLM, SamplingParams, RequestOutput
-
 import sys
-sys.path.append(".")
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from trl import GRPOConfig
+# Import configuration
+from config.training_config import (
+    get_experiment_config, get_grpo_config, 
+    get_model_config, get_peft_config
+)
+
+
 from utils.reward_functions import *
 from utils.env import ToolCallingEnv
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT as SYSTEM_PROMPT
 from utils.arsenal import TOOLS
+from utils.datasets import get_alpaca_instruction_response_pairs, get_natural_thinking_dataset, get_training_dataset
 from unsloth_compiled_cache.UnslothGRPOTrainer_loss_modified import UnslothGRPOTrainer
-# from unsloth_compiled_cache.UnslothGRPOTrainer import UnslothGRPOTrainer
+from logger.logger import mylogger as logger
 
 
-import copy
-
-debug = False
-
-if debug:
-    # improve torch tensor printing
-    import torch
-    def custom_repr(self):
-        return f'{{Tensor:{tuple(self.shape)}}} {original_repr(self)}'
-    original_repr = torch.Tensor.__repr__
-    torch.Tensor.__repr__ = custom_repr
-
-    # debug with debugpy
-    import debugpy
-    # Listen on a specific port (choose any available port, e.g., 61074)
-    debugpy.listen(("0.0.0.0", 61074))
-    print("Waiting for debugger to attach...")
-    # Optional: Wait for the debugger to attach before continuing execution
-    debugpy.wait_for_client()
-
-# ========== Hyperparameters ==========
-# exp_name = "ink_curated_data-only_markdown_struture_data-concise_sys_prompt_2-resume-add_logic_hieraychy_bonus_reward"
-# exp_name = "fix_lora_bug-saver_format_with_concrete_sys_prompt"
-if os.environ.get("EXP_NAME") is None:
-    raise ValueError("Environment Variable EXP_NAME must be set")
-exp_name = os.environ.get("EXP_NAME")
-max_seq_length = (4096 + 1024)
-max_prompt_length = 2048
-# NOTE: ?
-max_completion_length = max_seq_length - max_prompt_length
-lora_rank = 32
-
-MODEL_SIZE = "7B"
-run_name=f"Qwen2.5-{MODEL_SIZE}-GRPO-formatter-lora_{lora_rank}-{exp_name}-multi_step"
-output_dir=f"outputs/{run_name}"
+# ========== Get Experiment Configuration ==========
+exp_config = get_experiment_config()
+exp_name = exp_config["exp_name"]
+run_name = exp_config["run_name"]
+output_dir = exp_config["output_dir"]
 os.environ["OUTPUT_DIR"] = output_dir
-
 
 # ========== Environments ==========
 
-dataset_files = [
-    "datasets/alpaca/alpaca-markdown.json",
-    # "datasets/alpaca/alpaca-naive.json",
-    "datasets/natural_thinking/facebook_natural_reasoning-markhdown.json",
-    "datasets/help_steer3/HelpSteer3-markdown.json"
-]
-def get_training_dataset(json_files: list[str]):
-    all_data = []
-    for file in json_files:
-        with open(file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            all_data.extend(data)  # Merge datasets
-    
-    dataset = Dataset.from_list(all_data)
-    # shuffle
-    dataset = dataset.shuffle(seed=42)
-    # limit the input length to avoid OOM
-    # def check_length(text):
-    #     if len(text["prompt"][-1]['content']) < 3000:
-    #         return True
-    #     else:
-    #         return False
-    # dataset = dataset.filter(
-    #     check_length,
-    # )
-    print("\033[92m Dataset size: \033[0m", len(dataset))
-    return dataset
-
-
-def get_alpaca_instruction_response_pairs(split = "train")->Dataset:
-    dataset = load_dataset("yahma/alpaca-cleaned", split = "train")
-    # Filter out examples where the output length is less than 100 characters
-    dataset = dataset.filter(lambda example: len(example["output"]) >= 500 and len(example["output"]) <= 2000)
-    def formatting_prompts_func(examples):
-        instruction = examples["instruction"]
-        input       = examples["input"]
-        output      = examples["output"]
-        return {
-            'prompt': [
-                {'role': 'system', 'content': SYSTEM_PROMPT},
-                {'role': 'user', 'content': f"{instruction}\n{input}"}
-            ],
-            'response': output
-            # 'answer': extract_hash_answer(output)
-        }
-    dataset = dataset.map(formatting_prompts_func, batched = False)
-    return dataset
-
-                
-def get_natural_thinking_dataset(url, split="train", output_file="dataset.json", required_num_data=3500):
-    dataset = load_dataset(url, split=split)
-    dataset = dataset.shuffle(seed=42).select(range(min(50000, len(dataset))))  # Ensure we get up to 1000 samples
-    
-    def check_length(text):
-        text_lenth = len(text["responses"][0]['response'])
-        return (text_lenth > 50) and (text_lenth < 2000)
-    
-    dataset = dataset.filter(check_length)
-    
-    def formatting_prompts_func(examples):
-        instruction = examples["question"]
-        output = examples["responses"][0]["response"]
-        
-        return {
-            'prompt': [
-                {'role': 'system', 'content': SYSTEM_PROMPT},
-                {'role': 'user', 'content': instruction},
-            ],
-            'response': output
-        }
-    
-    dataset = dataset.map(formatting_prompts_func, batched=False)
-    # dataset = dataset.shuffle(seed=42).select(range(min(required_num_data, len(dataset))))  # Ensure we get up to 1000 samples
-    # dataset = dataset.remove_columns([col for col in dataset.column_names if col != "prompt"])
-    print("\033[92m number of data: \033[0m", len(dataset))
-    
-    return dataset
-
-
-dataset = get_alpaca_instruction_response_pairs()
-# dataset = get_natural_thinking_dataset("facebook/natural_reasoning", "train", "facebook_natural_reasoning-markhdown.json")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -154,81 +47,35 @@ if __name__ == "__main__":
         raise ValueError("--checkpoint must be specified when --resume is used")
     
     # load model and tokenizer
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = f"Qwen/Qwen2.5-{MODEL_SIZE}-Instruct",
-        max_seq_length = max_seq_length,
-        load_in_4bit=True,
-        fast_inference=True, # vLLM support
-        max_lora_rank=lora_rank,
-        gpu_memory_utilization=0.7,
-    )
-    
+    model_config = get_model_config()
+    model, tokenizer = FastLanguageModel.from_pretrained(**model_config)
     # override the original chat template
     # tokenizer.chat_template = Ink_QWEN_DEPENDENT_TOOL_CALL_TEMPLATE
     
+    peft_config = get_peft_config()
     model = FastLanguageModel.get_peft_model(
         model,
-        r = lora_rank,
-        target_modules = [
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
-        ],
-        lora_alpha = lora_rank, # adjust the learning rate of lora module, in effect
-        use_gradient_checkpointing= "unsloth",
-        random_state= 3407
+        **peft_config
     )
     
     # prepare dataset
     dataset = get_alpaca_instruction_response_pairs()
 
     # prepare trainer
-    train_args = GRPOConfig(
-        learning_rate= 5e-6,
-        adam_beta1 = 0.9,
-        adam_beta2 = 0.99,
-        weight_decay = 0.1,
-        warmup_ratio = 0.1,
-        lr_scheduler_type = "cosine",
-        optim = "paged_adamw_8bit",
-        logging_steps = 1,
-        per_device_train_batch_size = 1,
-        gradient_accumulation_steps = 1,
-        num_generations = 6,
-        max_prompt_length = max_prompt_length,
-        max_completion_length = max_completion_length,
-        num_train_epochs = 1,
-        # or
-        # max_steps=500,
-        save_steps = 250,
-        max_grad_norm = 0.1,
-        # report_to = "wandb",
-        output_dir = output_dir,
-        run_name = run_name,
-        logging_dir= output_dir,
-        logging_strategy= "steps",
-        log_level="info",
-        log_completions = True,
-    ) 
+    grpo_config = get_grpo_config()
+    train_args = GRPOConfig(**grpo_config)
     
+    # specify the environment for the agent
     custom_env = ToolCallingEnv(TOOLS)
+    
+    # reward functions are bound to environments. No need to be specified explicitly.
+    reward_funcs = []
+    
     trainer = UnslothGRPOTrainer(
         model=model,
         env=custom_env,
         processing_class=tokenizer,
-        reward_funcs=[
-            # yaml_format_reward_func,
-            # markdown_format_reward_func,
-            # placeholder_reward_func,
-            # logic_heading_hierarchy_func,
-            # overall_format_reward_func,
-            # more_tags_reward_func,
-            ordinary_tool_calling_reward_func,
-            dependent_tool_calling_reward_func,
-            log_func_multi_step,
-            # saver_content_reward_func,
-            saver_filetype_reward_func
-            
-        ],
+        reward_funcs=reward_funcs,
         args=train_args,
         train_dataset=dataset,
     )

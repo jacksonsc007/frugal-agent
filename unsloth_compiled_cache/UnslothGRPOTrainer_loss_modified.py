@@ -21,6 +21,7 @@ import numpy as np
 from contextlib import nullcontext
 from torch.nn import functional as F
 from transformers import DataCollatorForSeq2Seq, DataCollatorForLanguageModeling
+from logger.logger import mylogger as logger
 
 torch_compile_options = {
     "epilogue_fusion"   : True,
@@ -937,16 +938,6 @@ class _UnslothGRPOTrainer(Trainer):
     def _prepare_inputs(self, inputs: dict[str, Union[torch.Tensor, Any]]) -> dict[str, Union[torch.Tensor, Any]]:
         device = self.accelerator.device
         prompts = [x["prompt"] for x in inputs]
-        # prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
-        # prompt_inputs = self.processing_class(
-        #     prompts_text, return_tensors="pt", padding=True, padding_side="left", add_special_tokens=False
-        # )
-        # prompt_inputs = super()._prepare_inputs(prompt_inputs)
-        # prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
-
-        # if self.max_prompt_length is not None:
-        #     prompt_ids = prompt_ids[:, -self.max_prompt_length :]
-        #     prompt_mask = prompt_mask[:, -self.max_prompt_length :]
 
         # Generate completions using either vLLM or regular generation
         if self.args.use_vllm:
@@ -954,46 +945,25 @@ class _UnslothGRPOTrainer(Trainer):
             if self.state.global_step != self._last_loaded_step:
                 self._move_model_to_vllm()
                 self._last_loaded_step = self.state.global_step
-
             # Generate completions using vLLM: gather all prompts and use them in a single call in the main process
             all_prompts = gather_object(prompts)
             # all_prompts_text = gather_object(prompts_text)
             if self.accelerator.is_main_process:
                 if self.env is not None:
-                    # prompt_completion_pairs = self.env.generate(
-                    #     prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs
-                    # )
                     prompt_completion_pairs = self.env.generate(
-                        prompts=all_prompts, llm=self.llm, sampling_params=self.sampling_params, data=inputs, lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True)
+                        prompts=all_prompts, 
+                        llm=self.llm, 
+                        sampling_params=self.sampling_params,
+                        data=inputs,
+                        lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True)
                     )
                 else:
-                    raise ValueError("Ink: env is needed")
-                    outputs = self.llm.generate(all_prompts_text, sampling_params=self.sampling_params, use_tqdm=False, lora_request = self.model.load_lora('grpo_trainer_lora_model', load_tensors = True))
-                    completion_ids = [out.token_ids for completions in outputs for out in completions.outputs]
+                    raise ValueError("self.env is None. Please specify the environment")
+                    
             else:
-                raise ValueError("Ink: only support on main process")
-                completion_ids = [None] * len(all_prompts_text)
-            # Broadcast the completions from the main process to all processes, ensuring each process receives its
-            # corresponding slice.
+                raise ValueError("only one process is supported for now")
         else:
-            raise NotImplementedError("only vLLM is supported in this version of TRL for tool_calling.")
-            # Regular generation path
-            with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
-                prompt_completion_ids = unwrapped_model.generate(
-                    prompt_ids, attention_mask=prompt_mask, generation_config=self.generation_config
-                )
-
-            # Compute prompt length and extract completion ids
-            prompt_length = prompt_ids.size(1)
-            prompt_ids = prompt_completion_ids[:, :prompt_length]
-            completion_ids = prompt_completion_ids[:, prompt_length:]
-
-            # Mask completion_ids beginning from first EOS token
-            is_eos = completion_ids == self.processing_class.eos_token_id
-            eos_idx = torch.full((is_eos.size(0),), is_eos.size(1), dtype=torch.long, device=device)
-            eos_idx[is_eos.any(dim=1)] = is_eos.int().argmax(dim=1)[is_eos.any(dim=1)]
-            sequence_indices = torch.arange(is_eos.size(1), device=device).expand(is_eos.size(0), -1)
-            completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
+            raise NotImplementedError("only vLLM is supported for now.")
 
         num_stages = len(prompt_completion_pairs)
         all_stages_inputs = []
@@ -1046,28 +1016,9 @@ class _UnslothGRPOTrainer(Trainer):
             else:
                 completions = completions_text
 
-            rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
-            for i, (reward_func, reward_processing_class) in enumerate(
-                zip(self.reward_funcs, self.reward_processing_classes)
-            ):
-                if isinstance(reward_func, nn.Module):  # Module instead of PretrainedModel for compat with compiled models
-                    if is_conversational(inputs[0]):
-                        messages = [{"messages": p + c} for p, c in zip(prompts, completions)]
-                        texts = [apply_chat_template(x, reward_processing_class)["text"] for x in messages]
-                    else:
-                        texts = [p + c for p, c in zip(prompts, completions)]
-                    reward_inputs = reward_processing_class(
-                        texts, return_tensors="pt", padding=True, padding_side="right", add_special_tokens=False
-                    )
-                    reward_inputs = super()._prepare_inputs(reward_inputs)
-                    with torch.inference_mode(), torch.amp.autocast(device_type = 'cuda', dtype = ((torch.float16 if os.environ.get('ACCELERATE_MIXED_PRECISION', 'fp16') == 'fp16' else torch.bfloat16) if not torch.is_autocast_enabled('cuda') else nullcontext())if os.environ.get('UNSLOTH_FORCE_FLOAT32', '0') == '0' else torch.float16):
-                        rewards_per_func[:, i] = reward_func(**reward_inputs).logits[:, 0]  # Shape (B*G,)
-                else:
-                    # Repeat all input columns (but "prompt" and "completion") to match the number of generations
-                    keys = [key for key in inputs[0] if key not in ["prompt", "completion"]]
-                    reward_kwargs = {key: [example[key] for example in inputs] for key in keys}
-                    output_reward_func = reward_func(prompts=prompts, completions=completions, **reward_kwargs, stage_id=stage_id)
-                    rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
+            rewards_tmp = prompt_completion_pairs[stage_id].get("rewards", None)
+            reward_functions_tmp = prompt_completion_pairs[stage_id].get("reward_functions", None)
+            rewards_per_func = rewards_tmp
 
             # Gather the reward per function: this part is crucial, because the rewards are normalized per group and the
             # completions may be distributed across processes
@@ -1094,7 +1045,7 @@ class _UnslothGRPOTrainer(Trainer):
 
             # Log the metrics
             reward_per_func = rewards_per_func.mean(0)
-            for i, reward_func in enumerate(self.reward_funcs):
+            for i, reward_func in enumerate(reward_functions_tmp):
                 if isinstance(reward_func, nn.Module):  # Module instead of PretrainedModel for compat with compiled models
                     reward_func_name = reward_func.config._name_or_path.split("/")[-1]
                 else:
@@ -1290,6 +1241,7 @@ class _UnslothGRPOTrainer(Trainer):
         )
 
         model_card.save(os.path.join(self.args.output_dir, "README.md"))
+
 class UnslothGRPOTrainer(_UnslothGRPOTrainer):
     """
     

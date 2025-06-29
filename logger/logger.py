@@ -17,3 +17,7 @@ logging.basicConfig(level="INFO")
 if __name__ == "__main__":
     mylogger.info("info test")
     mylogger.debug("debug test")
+    mylogger.critical("crital test")
+    mylogger.error("error test")
+   
+

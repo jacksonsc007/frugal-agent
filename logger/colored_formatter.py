@@ -1,4 +1,5 @@
 import logging
+import re
 
 class ColoredFormatter(logging.Formatter):
     COLORS = {
@@ -14,4 +15,12 @@ class ColoredFormatter(logging.Formatter):
         color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         reset = self.COLORS['RESET']
         formatted = super().format(record)
-        return f"{color}{formatted}{reset}" 
+        
+        # Use regex to find content inside square brackets and color only that content
+        def color_brackets(match):
+            return f"{color}{match.group(0)}{reset}"
+        
+        # Replace content inside square brackets with colored version
+        colored_formatted = re.sub(r'\[[^\]]*\]', color_brackets, formatted)
+        
+        return colored_formatted 

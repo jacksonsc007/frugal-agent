@@ -1,16 +1,22 @@
 import copy
+import random
 from typing import List, Dict, Any, Tuple, Sequence
 from functools import partial
 import json
+import torch
+import re
+from pathlib import Path
 from vllm import LLM, SamplingParams, RequestOutput
 from vllm.lora.request import LoRARequest
-from .arsenal import get_function_by_name, try_parse_tool_calls, try_parse_intermediate_representation
+from .arsenal import get_function_by_name, try_parse_tool_calls, try_invoke_tool, try_parse_intermediate_representation 
 from collections import defaultdict
 import sys
 sys.path.append(".")
 from utils.sys_prompts import IT_SYS_PROMPT_deepseek_concise_2 as SYSTEM_PROMPT_FORMATTER
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_3, MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_GENERAL_FEWSHOT
 from utils.chat_template import Ink_QWEN_DEPENDENT_TOOL_CALL_TEMPLATE as vllm_chat_template
+from logger.logger import mylogger as logger
+from utils.arsenal import try_invoke_tool_calls
 
 
 class ToolCallingEnv:
@@ -23,110 +29,274 @@ class ToolCallingEnv:
     """
     def __init__(self, tools) -> None:
         self.tools = tools
-    def step(
+
+        self.num_stages = 2
+        self.reward_functions = self.get_reward_functions()
+        assert len(self.reward_functions) == self.num_stages
+        # the prompts for second stage
+        self.chat_template_path = Path("chat_templates/ink_qwen_dependent_tool_call_template.jinja")
+        # Load chat template from file
+        try:
+            with open(self.chat_template_path, 'r', encoding='utf-8') as f:
+                self.chat_template = f.read()
+        except FileNotFoundError:
+            logger.warning(f"Chat template file not found at {self.chat_template_path}, using default template")
+            self.chat_template = vllm_chat_template
+        except Exception as e:
+            logger.error(f"Error loading chat template from {self.chat_template_path}: {e}")
+            self.chat_template = vllm_chat_template
+        self.stage_prompts: List = self.get_stage_prompts()
+
+        self.tool_call_record = {}
+        
+    """
+    Get the reward functions for all stages.
+    """
+    def get_reward_functions(self) -> List:
+        reward_func_stage1 = [self.ordinary_tool_calling_reward_func]
+        reward_func_stage2 = [self.dependent_tool_calling_reward_func]
+        return [reward_func_stage1, reward_func_stage2]
+        
+    def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:
+        """
+        0. Only target at calling formatter and saver, for now.
+        1. Basic tool calling
+           json_format_reward : json format is correct;
+           valid_invoke_reward: tool calling is valid.
+        2. Dependent tool calling format
+            - call_sequence_id_awareness_reward: 
+                existence of call_seqnce_id
+            - tool_number_reward: 
+                awareness of the need to call two tools at once
+            - ir_awareness_reward: 
+                awareness of intermediate representation
+        3. formatter should not contain ir, saver should contain ir
+            tool_specific_reward
+            
+        """
+        if stage_id != 1:
+            return [0.] * len(completions)
+
+        responses = completions
+        def func_(text):
+            call_sequence_id_awareness_reward = 0
+            ir_awareness_reward = 0
+            tool_number_reward = 0
+            json_format_reward = 0
+            valid_invoke_reward = 0
+            call_id_correctness = 0
+            ir_content_correctness = 0
+            
+            output = try_parse_tool_calls(text)
+            invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output, {})
+            # print(invoke_result)
+            if len(invoke_result) > 0 and (all(invoke_result)):
+                valid_invoke_reward = 0.5
+            if tool_calls :=output.get("tool_calls"):
+                json_format_reward = 0.5
+                if len(tool_calls) == 2:
+                    tool_number_reward = 0.5
+                if all(t.get('function', {}).get('call_sequence_id', None) for t in tool_calls):
+                    call_sequence_id_awareness_reward = 0.5
+            # NOTE: we find the model hard to understand the intermediate representation. To encourage 
+            # the model to use as more intermediate representation as possible, we offer reward aggressively
+            all_match = re.findall(r"\{(\d+)\.output\}", text)
+            if len(all_match) > 0:
+                ir_awareness_reward = 0.5 * min(len(all_match), 2)
+            # print("\033[96m[Congrats] intermediate representation appears! \033[0m")
+            
+            # ensure call both format_organizer and save_file
+            if tool_names == ["format_organizer", "save_file"] or tool_names == ["save_file", "format_organizer"]:
+                for name, arg, t in zip(tool_names, tool_args, tool_calls):
+                    arg_str = json.dumps(arg, indent=2)
+                    if name == "format_organizer":
+                        if t.get('function', {}).get('call_sequence_id', -1) == 2:
+                            call_id_correctness += 0.5
+                        # if the tool is formatter, we should not see ir
+                        # NOTE: to discourage formatter to use {tool_reponse} to slack off
+                        match = re.search(r"\{(.+?)\}", arg_str)
+                        if match and match.group(1) == "1.output":
+                            ir_content_correctness += 0.5
+                        # NOTE: we find formatter sometimes use "1.response" to refer to the intermediate representation
+                        # Despite the format is not correct, we should encourage this behavior
+                        elif match and match.group(1) == "1.response":
+                            ir_content_correctness += 0.35
+                        # if the content of response is less than 88 characters, we assume the model adopts another way
+                        # to use the intermediate representation, we also encourage this behavior 
+                        elif arg.get('response') and len(arg['response']) < 88:
+                            ir_content_correctness += 0.15
+                    elif name == "save_file":
+                        if t.get('function', {}).get('call_sequence_id', -1) == 3:
+                            call_id_correctness += 0.5
+                        match = re.search(r"\{(.+?)\}", arg_str)
+                        if match and match.group(1) == "2.output":
+                            ir_content_correctness += 0.5
+                        elif match and match.group(1) == "1.response":
+                            ir_content_correctness += 0.25
+                        elif arg.get('content') and len(arg['content']) < 88:
+                            ir_content_correctness += 0.25
+            reward = call_sequence_id_awareness_reward + ir_awareness_reward + tool_number_reward + json_format_reward + valid_invoke_reward + call_id_correctness + ir_content_correctness
+            return reward
+
+        rewards = []
+        for r in responses:
+            reward = func_(r)
+            rewards.append(reward)
+        logger.info(f"dependent_tool_calling_reward_func: {rewards}")
+        return rewards
+
+    def ordinary_tool_calling_reward_func(self, completions, stage_id) -> list[float]:
+        """
+        0. Only target at question_answer_expert for now.
+        1. Validate if the tool call format is correct
+        2. tool call should contain call_sequence_id
+        """
+        responses = completions
+        # this reward function does not function for dependent tool calling
+        if stage_id == 1:
+            return [0.0 for _ in range(len(responses))]
+        def func_(text):
+            reward = 0
+            json_format_reward =0
+            valid_invoke_reward = 0
+            correct_tool_reward = 0
+            tool_call_id_awareness = 0
+            tool_call_id_correctness = 0
+
+            output = try_parse_tool_calls(text)
+            if output.get("tool_calls"):
+                json_format_reward = 0.5
+                if all(tool_call.get("function").get("call_sequence_id") for tool_call in output.get("tool_calls")):
+                    tool_call_id_awareness = 0.5
+                    if all(tool_call.get("function").get("call_sequence_id") == 1 for tool_call in output.get("tool_calls")):
+                        tool_call_id_correctness = 0.5
+                invoke_result, tool_names, _, _, _ = try_invoke_tool_calls(output, {})
+                if (all(invoke_result)):
+                    valid_invoke_reward = 0.5
+                    if all(tool_name == "question_answer_expert" for tool_name in tool_names):
+                        correct_tool_reward = 0.5
+            reward = json_format_reward + valid_invoke_reward + correct_tool_reward + tool_call_id_awareness + tool_call_id_correctness
+            return reward
+
+        rewards = []
+        for r in responses:
+            reward = func_(r)
+            rewards.append(reward)
+        logger.info(f"ordinary_tool_calling_reward_func: {rewards}")
+        return rewards
+
+    def show_prompt_response_pair(self, prompts: Dict, responses: List, stage_id: int):
+        q = ''.join(
+            [
+                f"\n=> {p['role']}:\n{p['content']}\n" if p.get( 'content' ) else f"\n=> {p['role']} tool_calling:\n{p['tool_calls']}\n" for p in prompts
+            ]
+        )
+        logger.debug("="*100)
+        logger.debug(  f"\n\033[92mQuestion stage-{stage_id}\033[0m:\n{q}")
+        for idx, r in enumerate(responses):
+            logger.debug(
+                f"\n\033[93mResponse {idx} stage-{stage_id}\033[m:\n{r}",
+            )
+        
+    """
+    Prepare the input prompts for all stages.
+    """
+    def get_stage_prompts(self) -> List:
+        # possible prompts for formatter and saver
+
+        first_stage_prompts = None
+        # multiple prompts are prepared
+        second_stage_prompts = [
+            "please format and save the formatted answer",
+            "format and save"
+        ]
+        prompts = [first_stage_prompts, second_stage_prompts]
+        return prompts
+
+    def sample_dev(
         self,
-        states: List[Dict[str, Any]],
+        prompts: List[Dict[str, Any]],
         llm: LLM,
         sampling_params: SamplingParams,
         data: List[Dict],
         lora_request: LoRARequest
     ) -> Tuple[List[Dict[str, Any]], List[RequestOutput]]:
-        chat_with_tools = partial(llm.chat, sampling_params=sampling_params, tools=self.tools, lora_request=lora_request, chat_template=vllm_chat_template)
-        # the initial prompt as the first tool_calling request
+        # wrap vllm sampling function
+        vllm_sample = partial(
+            llm.chat, sampling_params=sampling_params, tools=self.tools, lora_request=lora_request, chat_template=self.chat_template
+        )
         # the prompt must be same
-        if not all([d == data[0] for d in data]):
-            raise ValueError("The inputdata must be same among generations")
-        prompt = data[0]['prompt']
-        sys_prompt = prompt[0]
-        sys_prompt_for_dependent_tool_calls ={
-                "role": "system",
-                "content": MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_3
-        }
-        init_user_prompt = prompt[1]
-        # init system prompt
-        for s in states:
-            s['messages'].append(sys_prompt)
-            # s['messages'].append(sys_prompt_for_dependent_tool_calls)
-            # here is few-shot examples
-            use_few_shot = False
-            if use_few_shot:
-                s['messages'].extend(MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_GENERAL_FEWSHOT)
-#                 s['messages'].extend(
-#                     [
-#                         {
-#                             "role": "user",  
-#                             "content": "Please format and save the following content: what is avx? AVX (Advanced Vector Extensions) is an x86 CPU instruction set boosting floating-point and SIMD performance for tasks like multimedia/scientific computing. AVX2 adds integer ops; AVX-512 doubles vector width to 512 bits."},
-#                         {
-#                             "role": "assistant", 
-#                             "content": """<tool_call>
-# {"name": "format_organizer", "arguments": {"instruction": "What is AVX?", "response": "AVX (Advanced Vector Extensions) is an x86 CPU instruction set boosting floating-point and SIMD performance for tasks like multimedia/scientific computing. AVX2 adds integer ops; AVX-512 doubles vector width to 512 bits."}, "call_sequence_id": 1}
-# </tool_call>
-# <tool_call>
-# {"name": "save_file", "arguments": {"file_name": "avx_explanation.txt", "content": "{1.output}"}, "call_sequence_id": 2}
-# </tool_call>"""
-#                         },
-#                     ]
-#                 )
-        tool_calling_instructions = [
-            # should call 'expert'
-            init_user_prompt,
-            # should call 'formatter'
-            {
-                "role": "user", 
-                "content": "please format and save the formatted answer"
-            },
-            # should call 'saver'
-            # {
-            #     "role": "user", 
-                # choice 1: concrete instruction
-                # "content": "please save the formatted answer into a file named training_multi_step_tool_calling.md",
-                # choice 2: instruction from a slothful user
-                # "content": "save it to a file named training_multi_step_tool_calling.md",
-                # choice 3: instruction from an inveterately slothful user who is too lazy to be saved
-                # "content": "save it",
-            # },
-        ]
-        assert len(tool_calling_instructions) == 2, "In this exp, we only consider two tool chain"
-        for stage_id, ins in enumerate(tool_calling_instructions): # ins: instructions
-            for s in states:
-                s['messages'].append(ins)
-            input_messages = [s["messages"] for s in states]
-            # only process unfinished states
-            outputs = chat_with_tools(copy.deepcopy(input_messages))
-            for idx, output in enumerate(outputs):
-                # Track prompt_tokens to later slice out the completion part
+        if not all([p == prompts[0] for p in prompts]):
+            raise ValueError("The input prompts must be same")
+        states_all_stages = []
+        num_generations = len(prompts)
+        for stage_id in range(self.num_stages):
+            valid_generation_idx = -1 # record the index of a correct generation 
+            stage_prompt = self.stage_prompts[stage_id]
+            if stage_prompt is not None:
+                assert isinstance(stage_prompt, list)
+                extra_stage_message = {
+                    "role": "user",
+                    "content": random.choice(stage_prompt)
+                }
+                for out_idx in range(num_generations):
+                    prompts[out_idx].append(extra_stage_message)
+            # sampling through vLLM
+            outputs = vllm_sample(copy.deepcopy(prompts))
+            completions = []
+            state = defaultdict(list)
+            for out_idx, output in enumerate(outputs):
                 if output.outputs[0].finish_reason == "length":
-                    # raise ValueError("The generation is too long, please increase the max length")
-                    print("\033[96m[Truncation Warning]  The generation is too long, please increase the max length\033[0m")
-                state = states[idx]
+                    logger.error("The generation is truncated, please increase the max length")
                 state["prompt_token_ids"].append(output.prompt_token_ids)
                 state["completion_token_ids"].append(output.outputs[0].token_ids)
                 state["prompt_texts"].append(output.prompt)
-                state["prompt_messages"].append(copy.deepcopy(state["messages"]))
-                state["completion"].append(output.outputs[0].text)
+                state["prompt_messages"].append(copy.deepcopy(prompts[out_idx]))
+                comp: str = output.outputs[0].text
+                state["completion"].append(comp)
+                completions.append(comp)
+                """
+                Validate if the generation in the first stage is correct. If so, update prompts for next stage with tool response.
+                """
                 if stage_id == 0:
-                    if_use_tool, tool_name = self.try_parse_invoke_tool_calls(state["messages"], output, data[idx], llm, sampling_params, stage_id)
-                    state["tool_call"].append(if_use_tool)
+                    is_valid, tool_name = self.try_parse_invoke_tool_calls(prompts[out_idx], comp, data[out_idx], stage_id)
+                    # state["tool_call"].append(is_valid)
+                    if is_valid:
+                        valid_generation_idx = out_idx
+            self.show_prompt_response_pair(prompts[0], completions, stage_id)
+            reward_func_list: list  = self.reward_functions[stage_id]
+            num_r_funcs = len(reward_func_list)
+            rewards: torch.Tensor = torch.zeros(num_generations, num_r_funcs, device="cuda")
+            for i, func in enumerate(reward_func_list):
+                reward: list[float] = func(
+                    completions=completions, stage_id=stage_id
+                )
+                rewards[:, i] = torch.tensor(reward, dtype=torch.float32, device="cuda")
+            state["rewards"] = rewards
+            state["reward_functions"] = reward_func_list
+            states_all_stages.append(state)
+
+            """
+            Make sure the input prompts are same for the second stage.
+            We simply duplicate the correct generation in the first stage.
+            This is a hack to make sure the input prompts are identical among generations, since applying grpo requires the same input but distinct output
+            """
             if stage_id == 0:
-                # we manually align the input messages for next tool_calling even if therer is one generation getting the correct tool_calling format.
-                # This is a hack to make sure the input prompts are identical among generations.
-                # since applying grpo requires the same input but distinct output
-                correct_state_idx = None
-                for idx, state in enumerate(states):
-                    if state['tool_call'][-1]:
-                        correct_state_idx = idx
-                        break
-                if correct_state_idx is None:
+                if valid_generation_idx == -1:
                     # stop starting next tool_calling, when previous tool_calling generation all failed
-                    return states, stage_id
+                    return states_all_stages
                 # sync the input messages among all states before starting next tool call
                 # it make sure the prompt is same for each new tool call
-                for idx, state in enumerate(states):
-                    if idx != correct_state_idx:
-                        states[idx]["messages"] = copy.deepcopy(states[correct_state_idx]["messages"])
-        return states, stage_id
+                for out_idx in range(num_generations):
+                    if out_idx != valid_generation_idx:
+                        prompts[out_idx] = copy.deepcopy(prompts[valid_generation_idx])
+        return states_all_stages
 
-
+    """
+    The exlopration phase in RL.
+    The model generates a bunch of responses, given the same input prompt.
+    vLLM backend is empolyed to speed up generation.
+    """
     def generate(
         self,
         prompts: List[List[Dict[str, Any]]],
@@ -137,27 +307,8 @@ class ToolCallingEnv:
     ) -> List[Sequence[int]]:
         # to avoid in-place modification of the original prompts
         prompts = copy.deepcopy(prompts)
-        # Setup conversation states
-        states = [ ]
-        for p in prompts:
-            state = defaultdict(list)
-            states.append(state)
-        states,stage_idx = self.step(states, llm, sampling_params, data, lora_request)
-        # gather completions reaching the same stage
-        aligned_prompt_completion_pairs = []
-        for stage_idx in range(stage_idx+1):
-            aligned_prompt_completion_pairs.append(
-                # we've made sure the prompts are identical
-                {
-                    "prompt_token_ids"    : states[0] [ "prompt_token_ids"     ][stage_idx] ,
-                    "prompt_texts"        : states[0] [ "prompt_texts"         ][stage_idx],
-                    "prompt_messages"     : [ state [ "prompt_messages" ] [ stage_idx ] for state in states ] ,
-                    "completion_token_ids": [ state [ "completion_token_ids" ] [ stage_idx ] for state in states ] ,
-                    "completion"          : [ state [ "completion"           ] [ stage_idx ] for state in states ] ,
-                }
-            )
-        
-        return aligned_prompt_completion_pairs
+        states= self.sample_dev(prompts, llm, sampling_params, data, lora_request)
+        return states
 
     def convert_to_vllm_format(self, states):
         """vLLM requires the arguement of tool_calling to be string,
@@ -171,66 +322,39 @@ class ToolCallingEnv:
                     if isinstance(m['tool_calls'][0]['function']['arguments'], dict):
                         m['tool_calls'][0]['function']['arguments'] = json.dumps(m['tool_calls'][0]['function']['arguments'])
 
-    def try_parse_invoke_tool_calls(self, messages, final_response, data, llm, sampling_params, stage_id) -> bool:
+    def try_parse_invoke_tool_calls(self, messages, response, data, stage_id) -> bool:
         """parse and invoke tools"""
-        response = final_response.outputs[0].text
         assistant_message = try_parse_tool_calls(response)
-
         # assistant_message = final_response.choices[0].message.model_dump()
         messages.append(assistant_message)
 
-        if_use_tool = False
+        is_correct = False
         fn_name = None
-        dependent_tool_output_dict = {}
         # invoke tools
         assert stage_id == 0, "In this exp, we only consider two tool chain. Only question_answer_expert get a chance to be invoked"
         if "tool_calls" in assistant_message:
             if len(assistant_message["tool_calls"]) != 1:
                 # currently this function only support to invoke single call of question_answer_expert
-                return if_use_tool, fn_name
+                return False, None
             for tool_call in assistant_message["tool_calls"]:
-                try:
-                    fn_name = tool_call["function"]["name"]
-                    fn_args = json.loads(tool_call["function"]["arguments"], strict=False)
-                    call_sequence_id =tool_call["function"].get("call_sequence_id")
-                    if call_sequence_id is not None and not isinstance(call_sequence_id, int):
-                        print(f"\033[96m[Error] tool call id should be of type int, but we got {type(call_sequence_id)} Please check the parsing logic. \033[0m")
-                        print(call_sequence_id)
-                        
-                except Exception as e:
-                    print(f"Error parsing tool call {tool_call}\n {e}")
-                    continue
-                try:
-                    # Execute tool
-                    fn = get_function_by_name(fn_name)
-                    
-                    if call_sequence_id is not None:
-                        fn_args = try_parse_intermediate_representation(fn_args, dependent_tool_output_dict)
-                    
-                    # NOTE: the output is string for now
-                    # fn_result = json.dumps(fn(**fn_args))
-                    fn_result = (fn(**fn_args))
-                    """ NOTE:The following is a hack.
-                    For question_answer_expert, we use the gt answer as a pseudo answer from expert
-                    For formatter, We use the llm to generate formatted result.
-                    
-                    The above fn_result = fn(**fn_args) make sure the argument is passed correctly, or the exception is captured.
-                    """
-                    # NOTE:Since we intend to call formatter and saver both, they are in the same stage. In this case, we # only have two stages and we do not need the response from formatter. 
+                is_valid, fn_name, fn_args, fn_result = try_invoke_tool(tool_call)
+                """ NOTE The following is a hack.
+                For question_answer_expert, we use the gt answer as a pseudo answer from expert
+                For formatter, We use the llm to generate formatted result.
+                The above fn_result = fn(**fn_args) make sure the argument is passed correctly, or the exception is captured.
+                """
+                if is_valid:
+                    # NOTE:Since we intend to call formatter and saver both, they are in the same stage. In this case, we 
+                    # only have two stages and we do not need the response from formatter. 
                     if fn_name == "question_answer_expert":
                         fn_result = data['output']
-                        if_use_tool = True
-                        if call_sequence_id is not None:
-                            dependent_tool_output_dict[call_sequence_id] = fn_result
+                        is_correct = True
                         # Append tool response to state
                         messages.append({
                             "role": "tool",
                             "content": fn_result,
-                            # "tool_call_id": call_id
                         })
-                except Exception as e:
-                    print(f"Error: Failed to invoke tool {fn_name} with arguments {fn_args}: {e}") 
-        return if_use_tool, fn_name
+        return is_correct, fn_name
 
 
 class DoubleCheckEnv:

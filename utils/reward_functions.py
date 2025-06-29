@@ -336,7 +336,7 @@ def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs)
         ir_content_correctness = 0
         
         output = try_parse_tool_calls(text)
-        invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output)
+        invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output, {})
         # print(invoke_result)
         if len(invoke_result) > 0 and (all(invoke_result)):
             valid_invoke_reward = 0.5
@@ -417,7 +417,7 @@ def ordinary_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) 
                 tool_call_id_awareness = 0.5
                 if all(tool_call.get("function").get("call_sequence_id") == 1 for tool_call in output.get("tool_calls")):
                     tool_call_id_correctness = 0.5
-            invoke_result, tool_names, _, _, _ = try_invoke_tool_calls(output)
+            invoke_result, tool_names, _, _, _ = try_invoke_tool_calls(output, {})
             if (all(invoke_result)):
                 valid_invoke_reward = 0.5
                 if all(tool_name == "question_answer_expert" for tool_name in tool_names):
@@ -443,7 +443,7 @@ def saver_filetype_reward_func(prompts, completions, stage_id, **kwargs) -> list
     def func_(prompts, text):
         markdown_filetype_reward = 0
         output = try_parse_tool_calls(text)
-        invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output)
+        invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output, {})
         for idx, tool_name in enumerate(tool_names):
             if tool_name == "save_file":
                 file_name = tool_args[idx]["file_name"]
@@ -470,7 +470,7 @@ def saver_content_reward_func(prompts, completions, stage_id, **kwargs) -> list[
     def func_(prompts, text):
         content_integrity_reward = 0
         output = try_parse_tool_calls(text)
-        invoke_result, tool_names, tool_args = try_invoke_tool_calls(output)
+        invoke_result, tool_names, tool_args = try_invoke_tool_calls(output, {})
         if len(tool_names) != 1 or not invoke_result[0] or tool_names[0] != "save_file":
             return 0.0
         assert prompts[0][-2]['role'] == 'tool', "In this experiment, the second last prompt"

@@ -22,7 +22,7 @@ from utils.sys_prompts import MASTERMIND_SYS_PROMPT as SYSTEM_PROMPT
 from utils.arsenal import TOOLS
 from utils.reward_functions import *
 
-debug = False
+debug = True
 
 import os
 
@@ -262,16 +262,16 @@ training_args = GRPOConfig(
     lr_scheduler_type="cosine",
     logging_steps=1,
     bf16=True,
-    per_device_train_batch_size=2,
+    per_device_train_batch_size=3,
     gradient_accumulation_steps=4,
-    num_generations=2,
+    num_generations=3,
     max_prompt_length=1024,
     max_completion_length=2048,
     num_train_epochs=1,
     save_steps=100,
     max_grad_norm=0.1,
-    # report_to="none",
-    report_to="wandb",
+    report_to="none",
+    # report_to="wandb",
     log_on_each_node=False,
     log_completions=True,
 )
@@ -324,10 +324,10 @@ trainer = GRPOTrainer(
         # strict_format_reward_func,
         # int_reward_func,
         # correctness_reward_func,
-        ordinary_tool_calling_reward_func,
-        log_func_multi_step,
-        saver_content_reward_func,
-        saver_filetype_reward_func,
+        # ordinary_tool_calling_reward_func,
+        # log_func_multi_step,
+        # saver_content_reward_func,
+        # saver_filetype_reward_func,
     ],
     args=training_args,
     train_dataset=dataset,
