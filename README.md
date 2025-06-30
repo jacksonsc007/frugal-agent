@@ -8,7 +8,8 @@
 4. **Structured output formatting**, organizing instruction-answer pairs into **Obsidian-compatible Markdown**
 
 
-https://github.com/user-attachments/assets/7bbd7e82-af1b-4dbd-883a-1a9dcffb8e67
+
+https://github.com/user-attachments/assets/506b9b6d-8058-4151-ac7d-74864efcb154
 
 
 ---
