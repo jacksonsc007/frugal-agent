@@ -7,6 +7,10 @@
 3. **Instruction refinement**, including polishing user prompts and querying online-serving LLMs for assistance  
 4. **Structured output formatting**, organizing instruction-answer pairs into **Obsidian-compatible Markdown**
 
+
+https://github.com/user-attachments/assets/7bbd7e82-af1b-4dbd-883a-1a9dcffb8e67
+
+
 ---
 
 ## Core Files Overview
