@@ -4,7 +4,7 @@ import openai
 from openai import OpenAI
 from openai.lib.streaming.chat._completions import ChatCompletionStreamState
 from typing import Annotated
-from utils.sys_prompts import IT_SYS_PROMPT_deepseek_concise_2 as SYSTEM_PROMPT_FORMATTER
+from utils.sys_prompts import SYS_PROMPT_formatter_deepseek_concise_2 as SYSTEM_PROMPT_FORMATTER
 
 openai_api_key = "EMPTY"
 openai_api_base = "http://localhost:8000/v1"

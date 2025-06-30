@@ -306,7 +306,7 @@ def xmlcount_reward_func(completions, **kwargs) -> list[float]:
 # =============================
 from .arsenal import try_invoke_tool_calls, try_parse_tool_calls
 
-def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:
+def dependent_tool_calling_reward_func(completions, stage_id, **kwargs) -> list[float]:
     """
     0. Only target at calling formatter and saver, for now.
     1. Basic tool calling
@@ -326,7 +326,7 @@ def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs)
     if stage_id != 1:
         return [0.] * len(completions)
 
-    responses = [completion[0]['content'] for completion in completions]
+    responses = completions
     def func_(text):
         call_sequence_id_awareness_reward = 0
         ir_awareness_reward = 0
@@ -391,18 +391,18 @@ def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs)
     for r in responses:
         reward = func_(r)
         rewards.append(reward)
+    logger.info(f"dependent tool call reward: {rewards}")
     return rewards
 
-def ordinary_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:
+def ordinary_tool_calling_reward_func(completions, stage_id, **kwargs) -> list[float]:
     """
     0. Only target at question_answer_expert for now.
     1. If the tools called are correct
     2. tool call should contain call_sequence_id
     """
-    responses = [completion[0]['content'] for completion in completions]
     # this reward function does not function for dependent tool calling
     if stage_id == 1:
-        return [0.0 for _ in range(len(responses))]
+        return [0.0 for _ in range(len(completions))]
     def func_(text):
         reward = 0
         json_format_reward =0
@@ -427,9 +427,10 @@ def ordinary_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) 
         return reward
 
     rewards = []
-    for r in responses:
+    for r in completions:
         reward = func_(r)
         rewards.append(reward)
+    logger.info(f"ordinary tool call reward: {rewards}")
     return rewards
 
 def saver_filetype_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:

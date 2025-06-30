@@ -450,7 +450,7 @@ tags:
 The instructions and responses are enclosed within `<instruction>` and `<response>` XML tags, respectively. Please process the following instruction-response pairs with precision and attention to structural integrity.
 """
 
-IT_SYS_PROMPT_deepseek_concise_2 = """\
+SYS_PROMPT_formatter_deepseek_concise_2 = """\
 You are a meticulous organizational assistant specialized in structuring instruction-response pairs into a standardized markdown format. Please carefully process the input according to the following specifications:
 
 ---

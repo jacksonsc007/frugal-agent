@@ -164,8 +164,7 @@ def main() -> None:
         messages_state = gr.State(init_messages)
         dependent_tool_output_record = gr.State({})
         
-        gr.Markdown("# vLLM Agent Assistant")
-        gr.Markdown("A knowledgeable AI assistant with tool integration - Messages are styled by type")
+        gr.Markdown("# vLLM Agent Assistant ＜(´⌯  ̫⌯`)＞")
         
         chatbot = gr.Chatbot(height=1100, resizable=True, bubble_full_width=True, render="html", render_markdown=False)
         msg = gr.Textbox(label="Input", placeholder="Type your message here...")
@@ -176,7 +175,7 @@ def main() -> None:
             user_html = f"""
             <div class="message-container user-message">
                 <div class="message-header">
-                    <span class="message-icon">＜(´⌯  ̫⌯`)＞</span>
+                    <span class="message-icon">😼</span>
                     <span class="message-type">User</span>
                 </div>
                 <div class="message-content">

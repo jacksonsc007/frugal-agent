@@ -125,7 +125,7 @@ def handle_tool_calls(
                 for tool_msg_chunk in fn(**fn_args):
                     tool_msgs += tool_msg_chunk
                     # Yield only the new chunk, not the full accumulated output
-                    yield {"type": "tool_output", "content": tool_msg_chunk, "tool_name": fn_name}
+                    yield {"type": "tool_output", "content": tool_msgs, "tool_name": fn_name}
                 fn_result = tool_msgs
                 call_sequence_id = tool_call_sequence_id
                 if call_sequence_id is not None:

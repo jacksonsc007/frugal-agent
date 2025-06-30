@@ -12,11 +12,11 @@ from .arsenal import get_function_by_name, try_parse_tool_calls, try_invoke_tool
 from collections import defaultdict
 import sys
 sys.path.append(".")
-from utils.sys_prompts import IT_SYS_PROMPT_deepseek_concise_2 as SYSTEM_PROMPT_FORMATTER
+from utils.sys_prompts import SYS_PROMPT_formatter_deepseek_concise_2 as SYSTEM_PROMPT_FORMATTER
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_3, MASTERMIND_SYS_PROMPT_DEPENDENT_TOOL_CALLS_GENERAL_FEWSHOT
 from utils.logger.logger import mylogger as logger
 from utils.arsenal import try_invoke_tool_calls
-from utils.reward_functions import yaml_format_reward_func, markdown_format_reward_func, placeholder_reward_func, logic_heading_hierarchy_func, overall_format_reward_func, more_tags_reward_func
+from utils.reward_functions import yaml_format_reward_func, markdown_format_reward_func, placeholder_reward_func, logic_heading_hierarchy_func, overall_format_reward_func, more_tags_reward_func, dependent_tool_calling_reward_func, ordinary_tool_calling_reward_func
 
 
 
@@ -48,137 +48,10 @@ class ToolCallingEnv:
     Get the reward functions for all stages.
     """
     def get_reward_functions(self) -> List:
-        reward_func_stage1 = [self.ordinary_tool_calling_reward_func]
-        reward_func_stage2 = [self.dependent_tool_calling_reward_func]
+        reward_func_stage1 = [ordinary_tool_calling_reward_func]
+        reward_func_stage2 = [dependent_tool_calling_reward_func]
         return [reward_func_stage1, reward_func_stage2]
         
-    def dependent_tool_calling_reward_func(prompts, completions, stage_id, **kwargs) -> list[float]:
-        """
-        0. Only target at calling formatter and saver, for now.
-        1. Basic tool calling
-           json_format_reward : json format is correct;
-           valid_invoke_reward: tool calling is valid.
-        2. Dependent tool calling format
-            - call_sequence_id_awareness_reward: 
-                existence of call_seqnce_id
-            - tool_number_reward: 
-                awareness of the need to call two tools at once
-            - ir_awareness_reward: 
-                awareness of intermediate representation
-        3. formatter should not contain ir, saver should contain ir
-            tool_specific_reward
-            
-        """
-        if stage_id != 1:
-            return [0.] * len(completions)
-
-        responses = completions
-        def func_(text):
-            call_sequence_id_awareness_reward = 0
-            ir_awareness_reward = 0
-            tool_number_reward = 0
-            json_format_reward = 0
-            valid_invoke_reward = 0
-            call_id_correctness = 0
-            ir_content_correctness = 0
-            
-            output = try_parse_tool_calls(text)
-            invoke_result, tool_names, tool_args, _, _ = try_invoke_tool_calls(output, {})
-            # print(invoke_result)
-            if len(invoke_result) > 0 and (all(invoke_result)):
-                valid_invoke_reward = 0.5
-            if tool_calls :=output.get("tool_calls"):
-                json_format_reward = 0.5
-                if len(tool_calls) == 2:
-                    tool_number_reward = 0.5
-                if all(t.get('function', {}).get('call_sequence_id', None) for t in tool_calls):
-                    call_sequence_id_awareness_reward = 0.5
-            # NOTE: we find the model hard to understand the intermediate representation. To encourage 
-            # the model to use as more intermediate representation as possible, we offer reward aggressively
-            all_match = re.findall(r"\{(\d+)\.output\}", text)
-            if len(all_match) > 0:
-                ir_awareness_reward = 0.5 * min(len(all_match), 2)
-            # print("\033[96m[Congrats] intermediate representation appears! \033[0m")
-            
-            # ensure call both format_organizer and save_file
-            if tool_names == ["format_organizer", "save_file"] or tool_names == ["save_file", "format_organizer"]:
-                for name, arg, t in zip(tool_names, tool_args, tool_calls):
-                    arg_str = json.dumps(arg, indent=2)
-                    if name == "format_organizer":
-                        if t.get('function', {}).get('call_sequence_id', -1) == 2:
-                            call_id_correctness += 0.5
-                        # if the tool is formatter, we should not see ir
-                        # NOTE: to discourage formatter to use {tool_reponse} to slack off
-                        match = re.search(r"\{(.+?)\}", arg_str)
-                        if match and match.group(1) == "1.output":
-                            ir_content_correctness += 0.5
-                        # NOTE: we find formatter sometimes use "1.response" to refer to the intermediate representation
-                        # Despite the format is not correct, we should encourage this behavior
-                        elif match and match.group(1) == "1.response":
-                            ir_content_correctness += 0.35
-                        # if the content of response is less than 88 characters, we assume the model adopts another way
-                        # to use the intermediate representation, we also encourage this behavior 
-                        elif arg.get('response') and len(arg['response']) < 88:
-                            ir_content_correctness += 0.15
-                    elif name == "save_file":
-                        if t.get('function', {}).get('call_sequence_id', -1) == 3:
-                            call_id_correctness += 0.5
-                        match = re.search(r"\{(.+?)\}", arg_str)
-                        if match and match.group(1) == "2.output":
-                            ir_content_correctness += 0.5
-                        elif match and match.group(1) == "1.response":
-                            ir_content_correctness += 0.25
-                        elif arg.get('content') and len(arg['content']) < 88:
-                            ir_content_correctness += 0.25
-            reward = call_sequence_id_awareness_reward + ir_awareness_reward + tool_number_reward + json_format_reward + valid_invoke_reward + call_id_correctness + ir_content_correctness
-            return reward
-
-        rewards = []
-        for r in responses:
-            reward = func_(r)
-            rewards.append(reward)
-        logger.info(f"dependent_tool_calling_reward_func: {rewards}")
-        return rewards
-
-    def ordinary_tool_calling_reward_func(self, completions, stage_id) -> list[float]:
-        """
-        0. Only target at question_answer_expert for now.
-        1. Validate if the tool call format is correct
-        2. tool call should contain call_sequence_id
-        """
-        responses = completions
-        # this reward function does not function for dependent tool calling
-        if stage_id == 1:
-            return [0.0 for _ in range(len(responses))]
-        def func_(text):
-            reward = 0
-            json_format_reward =0
-            valid_invoke_reward = 0
-            correct_tool_reward = 0
-            tool_call_id_awareness = 0
-            tool_call_id_correctness = 0
-
-            output = try_parse_tool_calls(text)
-            if output.get("tool_calls"):
-                json_format_reward = 0.5
-                if all(tool_call.get("function").get("call_sequence_id") for tool_call in output.get("tool_calls")):
-                    tool_call_id_awareness = 0.5
-                    if all(tool_call.get("function").get("call_sequence_id") == 1 for tool_call in output.get("tool_calls")):
-                        tool_call_id_correctness = 0.5
-                invoke_result, tool_names, _, _, _ = try_invoke_tool_calls(output, {})
-                if (all(invoke_result)):
-                    valid_invoke_reward = 0.5
-                    if all(tool_name == "question_answer_expert" for tool_name in tool_names):
-                        correct_tool_reward = 0.5
-            reward = json_format_reward + valid_invoke_reward + correct_tool_reward + tool_call_id_awareness + tool_call_id_correctness
-            return reward
-
-        rewards = []
-        for r in responses:
-            reward = func_(r)
-            rewards.append(reward)
-        logger.info(f"ordinary_tool_calling_reward_func: {rewards}")
-        return rewards
 
     def log_prompt_response_pair(self, messages: Dict, prompt_text: str, responses: List, stage_id: int, friendly_output: bool = False):
         if friendly_output:
