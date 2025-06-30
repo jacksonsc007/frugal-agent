@@ -305,13 +305,6 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 tokenizer.pad_token = tokenizer.eos_token
 
-
-from utils.chat_template import Ink_QWEN_DEPENDENT_TOOL_CALL_TEMPLATE
-
-tokenizer.chat_template = Ink_QWEN_DEPENDENT_TOOL_CALL_TEMPLATE
-
-# use peft at your own risk; not working for me with multi-GPU training
-
 custom_env = ToolCallingEnv(TOOLS)
 
 trainer = GRPOTrainer(

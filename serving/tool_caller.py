@@ -1,9 +1,11 @@
 import json
-from typing import Any, Dict, Generator, List, Callable
-from parse_utils import TOOLS, get_function_by_name, try_parse_intermediate_representation
+from typing import Any, Dict, Generator, List, Callable, Union
+from parse_utils import get_function_by_name, try_parse_intermediate_representation
 from openai import OpenAI
 from openai.lib.streaming.chat._completions import ChatCompletionStreamState
 import openai
+from utils.arsenal import TOOLS
+from utils.logger.logger import mylogger as logger
 
 # You may need to set up the client here or pass it as an argument
 openai_api_key = "EMPTY"
@@ -16,9 +18,10 @@ def process_message(
     messages_state: List[Dict[str, Any]],
     dependent_tool_output_dict: Dict[str, Any],
     use_streaming: bool = True
-) -> Generator[str, None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """
     Process a user message, interact with the LLM, and delegate tool call handling to handle_tool_calls.
+    Yields structured responses to distinguish between assistant responses and tool outputs.
     """
     messages_state.append({"role": "user", "content": message})
     if use_streaming:
@@ -43,7 +46,8 @@ def process_message(
             for tool_call in tool_calls:
                 current_chunk += tool_call.function.arguments or ""
             assistant_response += current_chunk
-            yield assistant_response
+            # Yield assistant response with type identifier
+            yield {"type": "assistant", "content": assistant_response}
         final_response = state.get_final_completion()
         assistant_message = final_response.choices[0].message.model_dump()
     else:
@@ -55,6 +59,10 @@ def process_message(
             max_completion_tokens=2048,
         )
         assistant_message = response.choices[0].message.model_dump()
+        # Yield complete assistant response for non-streaming mode
+        assistant_content = assistant_message.get("content", "")
+        if assistant_content:
+            yield {"type": "assistant", "content": assistant_content}
 
     # Ensure tool call arguments are in the correct format
     try:
@@ -64,7 +72,7 @@ def process_message(
                 if isinstance(tool_call['function']['arguments'], dict):
                     tool_call['function']['arguments'] = json.dumps(tool_call['function']['arguments'])
     except Exception as e:
-        print("\033[96m[INFO]  Tool calls have incorrect function field\033[0m")
+        logger.warning("Tool calls have incorrect function field")
 
     messages_state.append(assistant_message)
 
@@ -76,7 +84,7 @@ def handle_tool_calls(
     assistant_message: Dict[str, Any],
     messages_state: List[Dict[str, Any]],
     dependent_tool_output_dict: Dict[str, Any]
-) -> Generator[str, None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """
     Handle tool calls from the assistant message, execute the corresponding functions,
     and update the conversation state.
@@ -87,41 +95,48 @@ def handle_tool_calls(
         dependent_tool_output_dict: Dictionary to store outputs of dependent tool calls.
 
     Yields:
-        str: Chunks of tool execution results or error messages.
+        Dict[str, Any]: Structured tool execution results with type and content.
     """
     tool_calls = assistant_message.get("tool_calls")
     if tool_calls is not None:
         for tool_call in tool_calls:
             call_id = tool_call["id"]
             fn_name = tool_call["function"]["name"]
+            
+            # Yield tool call start notification
+            yield {"type": "tool_start", "content": f"Executing tool: {fn_name}", "tool_name": fn_name}
+            
             try:
                 fn_args = tool_call["function"]["arguments"]
                 if isinstance(fn_args, str):
                     fn_args = json.loads(tool_call["function"]["arguments"], strict=False)
-                    print("\033[96m[INFO] Tool call arguments are in string format, please make sure the type is dict \033[0m")
+                    logger.warning("\033[96m[INFO] Tool call arguments are in string format, please make sure the type is dict \033[0m")
                 tool_call_sequence_id = tool_call["function"].get("call_sequence_id", None)
                 fn_args = try_parse_intermediate_representation(fn_args, dependent_tool_output_dict)
             except Exception as e:
                 error_message = f"Error parsing tool call arguments: {e}"
-                print(error_message)
-                yield error_message
+                logger.warning(error_message)
+                yield {"type": "tool_error", "content": error_message, "tool_name": fn_name}
                 messages_state.pop()
                 break
-            fn = get_function_by_name(fn_name)
             try:
+                fn = get_function_by_name(fn_name)
                 tool_msgs = ""
                 for tool_msg_chunk in fn(**fn_args):
                     tool_msgs += tool_msg_chunk
-                    yield tool_msgs
+                    # Yield only the new chunk, not the full accumulated output
+                    yield {"type": "tool_output", "content": tool_msg_chunk, "tool_name": fn_name}
                 fn_result = tool_msgs
                 call_sequence_id = tool_call_sequence_id
                 if call_sequence_id is not None:
                     if call_sequence_id in dependent_tool_output_dict:
                         raise ValueError(f"Duplicate call_sequence_id: {call_sequence_id}")
                     dependent_tool_output_dict[tool_call_sequence_id] = fn_result
-                    print(f"\033[96m[INFO] Tool output records updated: {dependent_tool_output_dict.keys()} \033[0m")
+                    logger.info(f"Tool calling records updated: {dependent_tool_output_dict.keys()} \033[0m")
             except Exception as e:
                 fn_result = json.dumps(f"Error: {str(e)}")
+                yield {"type": "tool_error", "content": fn_result, "tool_name": fn_name}
+            
             messages_state.append({
                 "role": "tool",
                 "content": fn_result,

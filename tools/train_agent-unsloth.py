@@ -1,5 +1,6 @@
-# unsloth needs to be import before importing trl
-from unsloth import FastLanguageModel
+"""
+The code was modified from https://colab.research.google.com/github/unslothai/notebooks/blob/main/nb/Qwen3_(4B)-GRPO.ipynb
+"""
 import torch
 import re
 import json
@@ -10,21 +11,23 @@ import sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+# unsloth needs to be import before importing trl
+from unsloth import FastLanguageModel
 from trl import GRPOConfig
+
 # Import configuration
-from config.training_config import (
+from config.multi_step_tool_calling.training_config import (
     get_experiment_config, get_grpo_config, 
     get_model_config, get_peft_config
 )
-
 
 from utils.reward_functions import *
 from utils.env import ToolCallingEnv
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT as SYSTEM_PROMPT
 from utils.arsenal import TOOLS
 from utils.datasets import get_alpaca_instruction_response_pairs, get_natural_thinking_dataset, get_training_dataset
-from unsloth_compiled_cache.UnslothGRPOTrainer_loss_modified import UnslothGRPOTrainer
-from logger.logger import mylogger as logger
+from utils.UnslothGRPOTrainer_modified import UnslothGRPOTrainer
+from utils.logger.logger import mylogger as logger
 
 
 # ========== Get Experiment Configuration ==========

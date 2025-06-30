@@ -3,7 +3,7 @@ Alpaca dataset processing utilities.
 """
 
 from datasets import load_dataset, Dataset
-from config.training_config import DATASET_CONFIG
+from config.multi_step_tool_calling.training_config import DATASET_CONFIG
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT as SYSTEM_PROMPT
 
 

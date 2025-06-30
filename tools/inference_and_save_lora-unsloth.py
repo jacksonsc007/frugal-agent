@@ -8,7 +8,7 @@ import sys
 sys.path.append(".")
 import argparse
 import os
-from logger.logger import mylogger as logger
+from utils.logger.logger import mylogger as logger
 
 # ========== Hyperparameters ==========
 max_seq_length = (4096 + 1024)

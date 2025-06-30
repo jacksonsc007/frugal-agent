@@ -1277,7 +1277,8 @@ class _UnslothGRPOTrainer(Trainer):
             rewards_per_func = gather(rewards_per_func)
 
             # Apply weights to each reward function's output and sum
-            rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
+            # rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
+            rewards = (rewards_per_func).sum(dim=1)
 
             # Compute grouped-wise rewards
             mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)

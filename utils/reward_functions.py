@@ -1,5 +1,6 @@
 import re
 import json
+from utils.logger.logger import mylogger as logger
 
 # Reward functions
 # =============================
@@ -15,8 +16,7 @@ SECTION_REGEX = r"# Instruction|# Summary|## Details"
 STRICT_SECTION_REGREX = r"# Instruction\n(.*\n)+# Summary\n(.*\n)+## Details"
 OVERALL_REGREX = r"^---\ntags:\n(?:  - (\S+)(?:[ ]+\1\/\S+)+\n)+---(\s)+# Instruction\n(.*\n)+# Summary\n(.*\n)+## Details\n(?!(.*\n)*(## |# ))(.*\n)+"
 
-def yaml_format_reward_func(completions, **kwargs) -> list[float]:
-    responses = [comp[0]["content"] for comp in completions]
+def yaml_format_reward_func(responses, **kwargs) -> list[float]:
     def strict_yaml_format_reward_func_(text: str):
         match = re.search(YAML_REGREX, text)
         if match:
@@ -45,11 +45,11 @@ def yaml_format_reward_func(completions, **kwargs) -> list[float]:
         if reward > 0.5:
             raise ValueError("format reward function should not be greater than 0.5")
         rewards.append(reward)
+    logger.info(f"yaml_format reward: {rewards}")
     return rewards
 
 # help model identify general_tag and sub_tag are just placeholders
-def placeholder_reward_func(completions, **kwargs) -> list[float]:
-    responses = [comp[0]["content"] for comp in completions]
+def placeholder_reward_func(responses, **kwargs) -> list[float]:
     # pattern = r"([\{,\},\S]+)\s+\1/([\{, \},\S]+)"
     tag_pattern = r"(\S+)\s+\1/(\S+)"
     extract_pattern = r"---\ntags:\n(?:  - (\S+)(?:[ ]+\1\/\S+)+\n)+---"
@@ -78,11 +78,11 @@ def placeholder_reward_func(completions, **kwargs) -> list[float]:
     for r in responses:
         reward = func_(r)
         rewards.append(reward)
+    logger.info(f"placeholder reward: {rewards}")
     return rewards
 
 # incentivize model to generate more tag pair (at most three)
-def more_tags_reward_func(completions, **kwargs) -> list[float]:
-    responses = [comp[0]["content"] for comp in completions]
+def more_tags_reward_func(responses, **kwargs) -> list[float]:
     # pattern = r"([\{,\},\S]+)\s+\1/([\{, \},\S]+)"
     tag_pattern = r"- (\w+)(?=[\n/ ])"
     # understand the meaning of []
@@ -112,13 +112,13 @@ def more_tags_reward_func(completions, **kwargs) -> list[float]:
     for r in responses:
         reward = func_(r)
         rewards.append(reward)
+    logger.info(f"more tags reward: {rewards}")
     return rewards
 
 
 
 # yaml and markdown requirements are both met
-def overall_format_reward_func(completions, **kwargs) -> list[float]:
-    responses = [comp[0]["content"] for comp in completions]
+def overall_format_reward_func(responses, **kwargs) -> list[float]:
     # OVERALL_REGREX = r"^---\ntags:\n(?:  - (\S+)(?:[ ]+\1\/\S+)+\n)+---(\s)+# Instruction\n(.*\n)+# Summary\n(.*\n)+## Details\n(?!(.*\n)+(## |# ))(.*\n)+"
     # heading level1 and level2 are not allowed after ##details,
     # unless they appear in codeblocks
@@ -145,12 +145,12 @@ def overall_format_reward_func(completions, **kwargs) -> list[float]:
         r = replace_code_block_content(r)
         reward = func_(r)
         rewards.append(reward)
+    logger.info(f"overall format reward: {rewards}")
     return rewards
 
 
 # TODO: apply this only when overall format is correct
-def logic_heading_hierarchy_func(completions, **kwargs) -> list[float]:
-    responses = [comp[0]["content"] for comp in completions]
+def logic_heading_hierarchy_func(responses, **kwargs) -> list[float]:
     def heading_hierarchy_func_(text):
         """
         Evaluate the logical hierarchy of heading levels.
@@ -208,10 +208,10 @@ def logic_heading_hierarchy_func(completions, **kwargs) -> list[float]:
         bonus = bonus_func_(r)
         reward += bonus
         rewards.append(reward)
+    logger.info(f"logic_heading_hierarchy_func reward: {rewards}")
     return rewards
-def markdown_format_reward_func(completions, **kwargs) -> list[float]:
-    responses = [comp[0]["content"] for comp in completions]
 
+def markdown_format_reward_func(responses, **kwargs) -> list[float]:
     def section_reward_func(text: str):
         match = re.findall(SECTION_REGEX, text, flags=re.MULTILINE)
         num_match = len(match)
@@ -228,6 +228,7 @@ def markdown_format_reward_func(completions, **kwargs) -> list[float]:
     for r in responses:
         reward = strict_markdown_format_reward_func(r)
         rewards.append(reward)
+    logger.info(f"markdown format reward: {rewards}")
     return rewards
         
 def log_func(prompts, completions, **kwargs) -> list[float]:
