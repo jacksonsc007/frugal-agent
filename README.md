@@ -17,6 +17,7 @@ https://github.com/user-attachments/assets/7bbd7e82-af1b-4dbd-883a-1a9dcffb8e67
 
 | Folder/File | Description |
 |-------------|-------------|
+| `chat_templates` | Custom chat templates |
 | `tools/` | Training and model saving scripts |
 | `serving/` | vLLM serving-related files |
 | `utils/env.py` | Core environment class that provides rewards to models |
@@ -108,7 +109,7 @@ bash serve_vllm.sh
 To support the **Frugal Agent** in production, the following customizations were made:
 
 1. **Custom chat template & tool parser** to handle the additional field `call_sequence_id`  
-   - Located at: `chat_templates/ink_qwen_dependent_tool_call_template.jinja`
+   - Located at: `chat_templates/ink_qwen_dependent_tool_call_template.jinja` and `utils/ink_dependent_tool_parser.py`
 
 2. **New streaming response classes** added to:  
    - `third_party/vllm/vllm/entrypoints/openai/protocol.py`:

@@ -9,7 +9,7 @@ from typing import Any, Dict, Generator, List, Optional
 sys.path.append("/root/workspace/ink_agent-multi_step")
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT_TOOL_SPECIFIC as MASTERMIND_SYS_PROMPT
 from openai import OpenAI
-from tool_caller import process_message
+from serving.processing import process_message
 
 
 debug = True

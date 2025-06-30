@@ -1,6 +1,6 @@
 import json
 from typing import Any, Dict, Generator, List, Callable, Union
-from parse_utils import get_function_by_name, try_parse_intermediate_representation
+from serving.tools import get_function_by_name, try_parse_intermediate_representation
 from openai import OpenAI
 from openai.lib.streaming.chat._completions import ChatCompletionStreamState
 import openai
@@ -37,17 +37,60 @@ def process_message(
             input_tools=openai.NOT_GIVEN,
             response_format=openai.NOT_GIVEN,
         )
-        assistant_response = ""
+        content_buffer = ""
+        tool_calls_buffer = {}
+        
         for chunk in stream:
             state.handle_chunk(chunk)
-            content = chunk.choices[0].delta.content or ""
-            tool_calls = chunk.choices[0].delta.tool_calls or []
-            current_chunk = content
-            for tool_call in tool_calls:
-                current_chunk += tool_call.function.arguments or ""
-            assistant_response += current_chunk
-            # Yield assistant response with type identifier
-            yield {"type": "assistant", "content": assistant_response}
+            # Process content
+            content_delta = chunk.choices[0].delta.content or ""
+            content_buffer += content_delta
+            
+            # Process tool calls
+            tool_call_deltas = chunk.choices[0].delta.tool_calls or []
+            
+            for delta in tool_call_deltas:
+                idx = delta.index
+                if idx not in tool_calls_buffer:
+                    tool_calls_buffer[idx] = {
+                        'name': '',
+                        'args': '',
+                        'id': ''
+                    }
+                
+                if delta.function:
+                    tool_calls_buffer[idx]['name'] += delta.function.name or ""
+                    tool_calls_buffer[idx]['args'] += delta.function.arguments or ""
+                    if hasattr(delta.function, "call_sequence_id"):
+                        tool_calls_buffer[idx]['id'] = str(delta.function.call_sequence_id)
+            
+            # Format output cleanly
+            output_lines = []
+            if content_buffer.strip():
+                output_lines.append(f"💬: {content_buffer.strip()}")
+            
+            for idx, tool in sorted(tool_calls_buffer.items()):
+                tool_output = []
+                if tool['name']:
+                    tool_output.append(f"🛠️ Calling {tool['name']}")
+                if tool['id']:
+                    tool_output.append(f"    • call_sequence_id #{tool['id']}")
+                if tool['args'].strip():
+                    try:
+                        args = json.loads(tool['args'])
+                        pretty_args = "\n".join(f"    • {k}: {v}" for k,v in args.items())
+                        tool_output.append(f"{pretty_args}")
+                    except:
+                        tool_output.append(f"{tool['args']}")
+                
+                if tool_output:
+                    output_lines.append("\n".join(tool_output))
+            
+            if output_lines:
+                yield {
+                    "type": "assistant",
+                    "content": "\n\n".join(output_lines)
+                }
         final_response = state.get_final_completion()
         assistant_message = final_response.choices[0].message.model_dump()
     else:

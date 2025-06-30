@@ -9,10 +9,10 @@ from typing import Any, Dict, Generator, List, Optional
 sys.path.append("/root/workspace/ink_agent-multi_step")
 from utils.sys_prompts import MASTERMIND_SYS_PROMPT_TOOL_SPECIFIC as MASTERMIND_SYS_PROMPT
 from openai import OpenAI
-from tool_caller import process_message
+from serving.processing import process_message
 
 
-debug = False
+debug = True
 if debug:
     # improve torch tensor printing
     import torch
@@ -55,7 +55,7 @@ def create_message_html(prefix: str, content: str, message_type: str) -> str:
             <span class="message-type">{prefix.strip()}</span>
         </div>
         <div class="message-content">
-            {content}
+{content}
         </div>
     </div>
     """
@@ -87,7 +87,9 @@ body, .message-container {
 }
 
 .message-content {
-    padding-left: 0px;
+    text-align: justify;
+    # white-space: pre-wrap;
+    padding: 10px 20px 10px 10px;
     font-size: 1.15em;
     width: 100%;
     margin: 0px 0px 0px 10px;
@@ -164,7 +166,7 @@ def main() -> None:
         messages_state = gr.State(init_messages)
         dependent_tool_output_record = gr.State({})
         
-        gr.Markdown("# vLLM Agent Assistant ＜(´⌯  ̫⌯`)＞")
+        gr.Markdown("# Frugal Agent ＜(´⌯  ̫⌯`)＞")
         
         chatbot = gr.Chatbot(height=1100, resizable=True, bubble_full_width=True, render="html", render_markdown=False)
         msg = gr.Textbox(label="Input", placeholder="Type your message here...")
@@ -179,7 +181,7 @@ def main() -> None:
                     <span class="message-type">User</span>
                 </div>
                 <div class="message-content">
-                    {user_message}
+{user_message}
                 </div>
             </div>
             """
