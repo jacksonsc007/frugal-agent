@@ -24,10 +24,13 @@ def process_message(
     Yields structured responses to distinguish between assistant responses and tool outputs.
     """
     messages_state.append({"role": "user", "content": message})
+    # model_name = "Qwen/Qwen3-8B"
+    # model_name = "Qwen/Qwen2.5-7B-Instruct"
+    model_name = "dependent_tool_caller"
     if use_streaming:
         stream = client.chat.completions.create(
             messages=messages_state,
-            model="dependent_tool_caller",
+            model=model_name,
             tools=TOOLS,
             stream=True,
             max_completion_tokens=4096,
@@ -96,7 +99,7 @@ def process_message(
     else:
         response = client.chat.completions.create(
             messages=messages_state,
-            model="dependent_tool_caller",
+            model=model_name,
             tools=TOOLS,
             stream=False,
             max_completion_tokens=2048,
