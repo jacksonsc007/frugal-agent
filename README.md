@@ -188,7 +188,7 @@ This model will:
 Run the notebook `datasets/alpaca/load_save_data.ipynb` to process the `alpaca` dataset.  
 Customize dataset settings in `config/formatter/training_config.py`.
 
-### Start Training
+### Train the formatter
 
 ```fish
 python tools/train_formatter-unsloth.py
